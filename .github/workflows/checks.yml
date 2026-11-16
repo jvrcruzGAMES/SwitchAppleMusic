@@ -1,0 +1,40 @@
+name: Checks
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - run: python -m venv .venv && .venv/bin/pip install -e './backend[test]'
+      - run: bash scripts/test-host.sh
+  audio-profile-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y build-essential ffmpeg
+      - run: python scripts/build-audio-ffmpeg.py --target host --jobs 2
+      - run: python scripts/test-audio-ffmpeg.py
+  switch:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: dkp-pacman -Syu --noconfirm
+      - run: dkp-pacman -S --needed --noconfirm switch-dev switch-cmake switch-curl switch-zlib switch-minizip switch-mbedtls switch-glm switch-libmpv switch-libplacebo switch-libjpeg-turbo
+      - run: python3 scripts/build-audio-ffmpeg.py --target switch --jobs 2
+      - run: python3 scripts/check-audio-budget.py
+      - run: cmake -S . -B build-switch -DCMAKE_BUILD_TYPE=Release && cmake --build build-switch -j2
+      - run: python3 scripts/package.py --build build-switch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SwitchMusic-sdcard
+          path: dist/SwitchMusic-sdcard.zip

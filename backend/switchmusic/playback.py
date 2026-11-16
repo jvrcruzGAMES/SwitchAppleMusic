@@ -3,7 +3,7 @@ import asyncio
 import time
 from pathlib import Path
 from fastapi import HTTPException
-from .codecs import select_source, decryption_allowed
+from .codecs import select_source, wrapper_source, decryption_allowed
 
 class Playback:
     def __init__(self, settings, apple):
@@ -64,7 +64,6 @@ class Playback:
             from gamdl.api.auth import AppleMusicCredentials
             from gamdl.transport import ApiHttpClient
             from gamdl.media import Song
-            from gamdl.drm import Drm
             from gamdl.stream import Streamer
         except ImportError:
             raise HTTPException(503, "Install backend playback dependencies") from None
@@ -77,8 +76,8 @@ class Playback:
                 song = Song(song_id, api=api, metadata=resource)
                 source = await select_source(song, wrapper)
                 codec = source.codec.value
-                drm = Drm.from_widevine(api) if codec == "aac-web" else None
-                async with Streamer(source, wrapper_api=wrapper, drm=drm, concurrency=2,
+                source = await wrapper_source(source)
+                async with Streamer(source, wrapper_api=wrapper, concurrency=2,
                                     chunk_size=64 * 1024) as stream:
                     if not decryption_allowed(codec, stream.decryption_method):
                         raise HTTPException(502, "No supported decrypted audio stream available")

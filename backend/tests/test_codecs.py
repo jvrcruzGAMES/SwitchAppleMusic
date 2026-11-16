@@ -29,8 +29,8 @@ async def test_atmos_is_rejected_even_if_upstream_returns_it():
 @pytest.mark.parametrize('codec,method,expected',[
     ('alac-hires','wrapper',True),('alac-lossless','wrapper',True),
     ('aac','wrapper',True),('aac','fixed_prefetch_key',True),
-    ('aac-web','widevine',True),('aac-web','none',True),
-    ('aac-web','wrapper',False),('aac','none',False),('atmos','wrapper',False),('ac3','widevine',False),
+    ('aac-web','widevine',False),('aac-web','none',False),
+    ('aac-web','wrapper',True),('aac','none',False),('atmos','wrapper',False),('ac3','widevine',False),
 ])
 def test_decryption_policy(codec,method,expected):
     assert decryption_allowed(codec,method)==expected

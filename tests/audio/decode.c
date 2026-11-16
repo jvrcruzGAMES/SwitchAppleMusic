@@ -10,16 +10,20 @@
 
 static int emit(AVFrame *frame, SwrContext *swr, FILE *output) {
     uint8_t pcm[4096 * 2 * sizeof(int16_t)];
-    const uint8_t **input = (const uint8_t **)frame->extended_data;
-    int samples = frame->nb_samples;
-    do {
+    const int planar = av_sample_fmt_is_planar(frame->format);
+    const int bytes = av_get_bytes_per_sample(frame->format);
+    const int channels = frame->ch_layout.nb_channels;
+    if (channels < 1 || channels > 8 || bytes < 1) return AVERROR(EINVAL);
+    for (int offset = 0; offset < frame->nb_samples; offset += 512) {
+        const uint8_t *input[8] = {0};
+        int samples = FFMIN(512, frame->nb_samples - offset);
+        for (int i = 0; i < (planar ? channels : 1); ++i)
+            input[i] = frame->extended_data[i] + offset * bytes * (planar ? 1 : channels);
         uint8_t *destination = pcm;
         int count = swr_convert(swr, &destination, 4096, input, samples);
         if (count < 0) return count;
         if (count && fwrite(pcm, 4, count, output) != (size_t)count) return AVERROR(EIO);
-        input = NULL; samples = 0;
-        if (count < 4096) break;
-    } while (1);
+    }
     return 0;
 }
 
@@ -30,6 +34,7 @@ static int decode(const char *path) {
     AVFrame *frame = NULL;
     SwrContext *swr = NULL;
     int result = 1, audio = -1, rc;
+    int64_t remaining = INT64_MAX;
     if (!format) goto cleanup;
     format->probesize = 256 * 1024;
     format->max_analyze_duration = 2 * AV_TIME_BASE;
@@ -50,6 +55,9 @@ static int decode(const char *path) {
     decoder->thread_count = 1;
     decoder->max_samples = 8 * 32768;
     if (avcodec_open2(decoder, codec, NULL) < 0) goto cleanup;
+    if (format->streams[audio]->duration != AV_NOPTS_VALUE)
+        remaining = av_rescale_q(format->streams[audio]->duration,
+            format->streams[audio]->time_base, (AVRational){1, decoder->sample_rate});
     packet = av_packet_alloc(); frame = av_frame_alloc();
     if (!packet || !frame) goto cleanup;
     while ((rc = av_read_frame(format, packet)) >= 0) {
@@ -62,7 +70,9 @@ static int decode(const char *path) {
                     if (swr_alloc_set_opts2(&swr, &stereo, AV_SAMPLE_FMT_S16, 48000,
                         &frame->ch_layout, frame->format, frame->sample_rate, 0, NULL) < 0 || swr_init(swr) < 0) goto cleanup;
                 }
-                if (emit(frame, swr, stdout) < 0) goto cleanup;
+                if (frame->nb_samples > remaining) frame->nb_samples = remaining;
+                remaining -= frame->nb_samples;
+                if (frame->nb_samples && emit(frame, swr, stdout) < 0) goto cleanup;
                 av_frame_unref(frame);
             }
             if (rc != AVERROR(EAGAIN) && rc != AVERROR_EOF) goto cleanup;

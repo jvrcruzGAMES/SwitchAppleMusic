@@ -13,6 +13,20 @@ The NRO browses your library songs, albums, playlists, and their tracks. Selecti
 
 **Status:** all three native outputs cross-compile. Backend and framing tests pass. No Switch hardware or authenticated Apple/Musixmatch account was available for end-to-end validation. The stock mpv/FFmpeg build produces a sysmodule with about **81 MiB of ELF text/data/BSS**, including a configurable 32 MiB heap, before extra thread/service allocations. A suitably sized system memory pool or a smaller audio-only mpv/FFmpeg build is required; this is not a verified drop-in module for a default Atmosphere installation. See [validation and remaining limitations](docs/VALIDATION.md).
 
+## Low-memory FFmpeg build (Option 2)
+
+A separate audio-only Switch FFmpeg SDK now supports **AAC, AAC-web and ALAC**, with Atmos/AC-3 excluded. Its cross-linked decoder + HTTP/control + HOS-audio fixture is **11.92 MB**, including an 8 MiB heap. Adding a 4 MiB platform allowance gives a **16.11 MB planning budget**, below the 22 MB target and 36.6 MB maximum. This is not an on-device peak measurement, and the existing mpv sysmodule has not been replaced by this SDK.
+
+```sh
+python3 scripts/build-audio-ffmpeg.py --target switch
+python3 scripts/check-audio-budget.py
+python3 scripts/build-audio-ffmpeg.py --target host
+python3 scripts/test-audio-ffmpeg.py
+python3 scripts/package-audio-ffmpeg.py
+```
+
+The backend prefers **ALAC → AAC → AAC-web**, using wrapper-v2 only. See [the profile, measurements and integration boundaries](docs/AUDIO_FFMPEG.md). The SDK archive is `dist/switch-ffmpeg-audio-7.1-switchmusic.tar.gz`.
+
 ## Build
 
 Install devkitPro, devkitA64, libnx, switch-tools, CMake, and the Switch packages below. libultrahand currently requires a compiler supporting C++26.

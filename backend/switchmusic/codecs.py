@@ -16,8 +16,36 @@ async def select_source(song, wrapper):
     return source
 
 
+async def wrapper_source(source):
+    """Adapt web AAC with real FairPlay signaling to the pinned wrapper engine.
+
+    Gamdl 4.0 excludes WEBPLAYBACK from wrapper eligibility. Preserve the actual
+    manifest/key metadata while using its supported generic wrapper audio type.
+    Never invent a key URI or pass encrypted bytes through unchanged.
+    """
+    if source.codec.value != "aac-web":
+        return source
+    from dataclasses import replace
+    from gamdl.media import AudioStream, StreamOrigin
+    from gamdl.media.stream import StreamTransport
+
+    info = await source.get_drm_info()
+    uri = info.fairplay_streaming or info.untyped_key_uri
+    if not isinstance(uri, str) or not uri.startswith("skd://") or len(uri) <= 6:
+        raise HTTPException(502, "AAC-web stream has no wrapper-compatible FairPlay key URI")
+    signaling = replace(info, fairplay_streaming=uri)
+
+    class WrapperWebAudio(AudioStream):
+        async def get_manifest(self):
+            return await source.get_manifest()
+
+        async def get_drm_info(self):
+            return signaling
+
+    return WrapperWebAudio(codec=source.codec, origin=StreamOrigin.WRAPPER_HLS,
+        url=source.url, transport=StreamTransport(), media_id=source.media_id,
+        bitrate=source.bitrate, codec_string=source.codec_string)
+
+
 def decryption_allowed(codec, method):
-    # Web AAC is a distinct Widevine delivery path, even with wrapper connected.
-    if codec == "aac-web":
-        return method in {"widevine", "none"}
     return codec in SUPPORTED_SONG_CODECS and method in {"wrapper", "fixed_prefetch_key"}

@@ -18,7 +18,7 @@ def main():
     args=p.parse_args();prefix=args.prefix.resolve();out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     dkp=Path(os.environ.get('DEVKITPRO','/opt/devkitpro'));cc=dkp/'devkitA64/bin/aarch64-none-elf-gcc';cxx=dkp/'devkitA64/bin/aarch64-none-elf-g++'
     env=os.environ.copy();env['DEVKITPRO']=str(dkp)
-    flags=['-D__SWITCH__','-DCURL_STATICLIB','-Os','-fPIE','-ffunction-sections','-fdata-sections','-march=armv8-a+crc+crypto','-mtune=cortex-a57','-mtp=soft','-ftls-model=local-exec',f'-I{prefix}/include',f'-I{dkp}/libnx/include',f'-I{dkp}/portlibs/switch/include']
+    flags=['-D_GNU_SOURCE','-D__SWITCH__','-DCURL_STATICLIB','-Os','-fPIE','-ffunction-sections','-fdata-sections','-march=armv8-a+crc+crypto','-mtune=cortex-a57','-mtp=soft','-ftls-model=local-exec',f'-I{prefix}/include',f'-I{dkp}/libnx/include',f'-I{dkp}/portlibs/switch/include']
     run([cc,*flags,'-DSWITCHMUSIC_BUDGET_PROBE','-c',ROOT/'tests/audio/decode.c','-o',out/'decode.o'],env=env)
     includes=[f'-I{ROOT}/common/include',f'-I{ROOT}/third_party/json']
     objects=[]

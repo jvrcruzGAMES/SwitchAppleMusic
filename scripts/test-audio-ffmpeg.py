@@ -41,6 +41,8 @@ def main():
             media=temp/(name+'.m4a');reference=temp/'reference.pcm';actual=temp/'actual.pcm'
             command=[args.ffmpeg,'-v','error','-f','lavfi','-i',f'sine=frequency=997:sample_rate={rate}:duration=3',
                      '-af','atrim=end_sample=98304','-ac','2','-c:a',codec,'-sample_fmt',sample_format]
+            # Preserve sample-accurate edit durations on older MOV muxers too.
+            command+=['-movie_timescale',str(rate)]
             if codec=='aac':command+=['-b:a','256k']
             if fragmented:command+=['-movflags','frag_keyframe+empty_moov','-frag_duration','500000']
             run([*command,'-y',media])

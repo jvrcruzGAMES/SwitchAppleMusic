@@ -27,7 +27,7 @@ def settings(tmp_path):
     key = ec.generate_private_key(ec.SECP256R1())
     p = tmp_path / 'key.p8'
     p.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
-    return Settings(PASSWORD, 'TEAM', 'KEY', p, data_dir=tmp_path/'data', public_url='http://testserver', secure_cookies=False, wrapper_url='http://wrapper', cache_dir=tmp_path/'cache')
+    return Settings(PASSWORD, 'TEAM123456', 'KEY1234567', p, data_dir=tmp_path/'data', public_url='http://testserver', secure_cookies=False, wrapper_url='http://wrapper', cache_dir=tmp_path/'cache')
 
 @pytest.fixture
 def client(settings):
@@ -40,7 +40,7 @@ def client(settings):
             else:
                 assert 'Music-User-Token' not in request.headers
             token = request.headers['Authorization'].removeprefix('Bearer ')
-            assert jwt.decode(token, options={'verify_signature': False})['iss'] == 'TEAM'
+            assert jwt.decode(token, options={'verify_signature': False})['iss'] == 'TEAM123456'
             if request.url.path.endswith('/catalog') or '/catalog/' in request.url.path:
                 return httpx.Response(200, json={'data': [SONG]})
             return httpx.Response(200, json={'data': [dict(SONG, id='i.local', type='library-songs')], 'next': '/v1/me/library/songs?offset=1'})

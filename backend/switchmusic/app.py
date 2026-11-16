@@ -210,14 +210,16 @@ def create_app(settings=None,transport=None):
     @app.post('/auth/apple/start')
     async def start_apple(body: AppleStart|None=None,principal: Principal=Depends(current)):
         if not principal.session_token:raise HTTPException(400,'Sign in on the website to link Apple Music')
+        authorization=await app.state.apple.authorization_token()
         return {'state':app.state.accounts.start_link(principal.user['id'],principal.session_token,body.qr_code if body else None),
-                'developer_token':app.state.apple.developer_token()}
+                **authorization}
 
     @app.post('/auth/apple/callback')
     async def finish_apple(body: AppleCallback,principal: Principal=Depends(current)):
         if not principal.session_token:raise HTTPException(400,'Sign in on the website to link Apple Music')
+        if body.music_user_token.strip()!=body.music_user_token or body.music_user_token.lower() in ('undefined','null') or '\r' in body.music_user_token or '\n' in body.music_user_token:
+            raise HTTPException(422,'MusicKit did not return a valid Music User Token; complete Apple Music authorization before linking')
         app.state.accounts.consume_link(principal.user['id'],principal.session_token,body.state,body.qr_code)
-        if '\r' in body.music_user_token or '\n' in body.music_user_token:raise HTTPException(422,'Invalid Apple authorization')
         linked=Apple(app.state.settings,app.state.http,body.music_user_token)
         payload=await linked.get('me/storefront')
         data=payload.get('data',[])

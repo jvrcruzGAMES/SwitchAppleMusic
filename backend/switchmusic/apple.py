@@ -1,4 +1,9 @@
 import time
+import re
+from urllib.parse import urlsplit
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 import httpx
 import jwt
 from fastapi import HTTPException
@@ -18,15 +23,45 @@ class Apple:
         self.s, self.http = settings, http
         self.token = user_token
         self.storefront = storefront or settings.storefront
-        self._jwt, self._until = "", 0
+        self._tokens = {}
+        self._verified_token, self._verified_until = "", 0
 
-    def developer_token(self):
-        now = int(time.time())
-        if now >= self._until:
-            self._jwt = jwt.encode({"iss": self.s.team_id, "iat": now, "exp": now + 3600},
-                self.s.private_key.read_text(), algorithm="ES256", headers={"kid": self.s.key_id})
-            self._until = now + 3300
-        return self._jwt
+    def developer_token(self,origin=None):
+        now=int(time.time());cached=self._tokens.get(origin)
+        if cached and now<cached[1]:return cached[0]
+        team=self.s.team_id.strip();key_id=self.s.key_id.strip()
+        if not re.fullmatch('[A-Z0-9]{10}',team) or not re.fullmatch('[A-Z0-9]{10}',key_id):
+            raise HTTPException(503,'Set APPLE_TEAM_ID and APPLE_KEY_ID to the 10-character identifiers for your MusicKit key')
+        try:
+            key=serialization.load_pem_private_key(self.s.private_key.read_bytes(),password=None)
+            if not isinstance(key,ec.EllipticCurvePrivateKey) or not isinstance(key.curve,ec.SECP256R1):raise ValueError('Expected P-256')
+            claims={'iss':team,'iat':now,'exp':now+3600}
+            if origin:claims['origin']=[origin]
+            token=jwt.encode(claims,key,algorithm='ES256',headers={'kid':key_id})
+        except (OSError,ValueError,TypeError,UnsupportedAlgorithm,jwt.PyJWTError):
+            raise HTTPException(503,'Cannot load the MusicKit signing key; check APPLE_KEY_FILE permissions and use an unencrypted P-256 .p8 MusicKit key') from None
+        self._tokens[origin]=(token,now+3300)
+        return token
+
+    async def authorization_token(self):
+        public=urlsplit(self.s.public_url)
+        if public.scheme not in ('https','http') or not public.netloc or public.username or public.password or public.path not in ('','/') or public.query or public.fragment:
+            raise HTTPException(503,'Set PUBLIC_URL to the exact origin used to open this website')
+        origin=f'{public.scheme}://{public.netloc}'
+        token=self.developer_token(origin)
+        if self._verified_token!=token or time.time()>=self._verified_until:
+            try:
+                response=await self.http.get('https://api.music.apple.com/v1/catalog/'+self.s.storefront+'/search',
+                    params={'term':'music','types':'songs','limit':1},headers={'Authorization':'Bearer '+token,'Origin':origin})
+            except httpx.HTTPError:
+                raise HTTPException(502,'Could not verify the MusicKit developer JWT with Apple; check server connectivity and retry') from None
+            if response.status_code in (401,403):
+                raise HTTPException(503,f'Apple rejected the MusicKit developer JWT (HTTP {response.status_code}); check that APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_KEY_FILE belong to the same active MusicKit key and that the server clock is correct')
+            if response.status_code!=200:
+                raise HTTPException(502,f'Apple developer-token verification returned HTTP {response.status_code}; check APPLE_STOREFRONT and retry')
+            self._verified_token=token;self._verified_until=time.time()+120
+        return {'developer_token':token,'developer_token_verified':True,
+                'expires_at':jwt.decode(token,options={'verify_signature':False})['exp']}
 
     async def user_token(self):
         if not self.token:

@@ -24,6 +24,14 @@ An initial queue contains at most 128 items. The NRO sends the visible library p
 
 Playback selection prefers ALAC, AAC, then AAC-web; Atmos/AC-3 are excluded. Decryption uses wrapper-v2 only. See [the audio profile](AUDIO_FFMPEG.md) for the pinned Gamdl AAC-web signaling adapter and the isolated Option 2 build. The pinned Gamdl native extension handles fMP4 sample extraction, wrapper-v2 batch decryption, and decrypted MP4 signaling. Unhandled encryption fails instead of being served as audio. The backend pins files while responses are in flight so eviction cannot remove an active response. It serializes cache preparation, caps a track at 256 MiB and the cache at 512 MiB, expires files after 1800 seconds, and returns a range-capable `FileResponse`. The sysmodule downloads to one of two rotating local files and opens it with mpv. This design prioritizes a simple seekable input over immediate playback; preparation is not gapless and there is no prefetch, offline library or lossless/Atmos mode.
 
+## Hekate Toolbox lifecycle
+
+The SD package includes `atmosphere/contents/420000000000534D/toolbox.json` with the same program ID as the NPDM and `requires_reboot: false`. [Hekate Toolbox's sysmodule manager](https://github.com/WerWolv/Hekate-Toolbox/blob/master/source/gui/gui_sysmodule.cpp) uses this to expose live process launch/termination rather than requiring a reboot. Its toggle also creates/removes `flags/boot2.flag`, controlling automatic startup on subsequent boots. The package leaves that flag absent by default.
+
+Disabling is process termination, not an in-player pause or a graceful queue drain: audio and in-flight operations stop, and re-enabling starts with an empty queue. Configuration stays on SD. The control server already uses `SO_REUSEADDR`, and clients use fresh short-lived connections for every request, so they do not retain a session to the old process. The NRO/overlay show the unavailable state while stopped and retry state polling automatically. A start still requires valid configuration and sufficient system memory; metadata cannot make an oversized process fit the system pool.
+
+Packaging validates the Toolbox display name, exact title ID and live-toggle flag, and hashes `toolbox.json` in the archive manifest. Live toggling, renderer cleanup and immediate relaunch remain hardware acceptance checks.
+
 ## Local control wire format
 
 Every connection carries one request and one response. Each frame is a **4-byte big-endian unsigned JSON byte length**, followed by UTF-8 JSON. Maximum payload: 65536 bytes. Malformed/oversized frames are rejected. Requests must include `version: 1` and `token`, matching the backend device token in the shared SD configuration.

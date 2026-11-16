@@ -22,7 +22,19 @@ def pfs_entries(data):
         files[name] = data[payload + offset:payload + offset + size]
     return files
 
+def validate_toolbox(path):
+    metadata = json.loads(path.read_text())
+    if not isinstance(metadata, dict) or not isinstance(metadata.get('name'), str) or not metadata['name'].strip():
+        raise ValueError('Toolbox metadata must include a display name')
+    if metadata.get('tid') != f'{TITLE:016X}':
+        raise ValueError('Toolbox title ID must match the packaged sysmodule')
+    if metadata.get('requires_reboot') is not False:
+        raise ValueError('SwitchMusic Toolbox metadata must allow live load/unload')
+    return metadata
+
+
 def validate(build):
+    validate_toolbox(ROOT/'sysmodule/toolbox.json')
     nro = (build / 'SwitchMusic.nro').read_bytes()
     ovl = (build / 'switchmusic.ovl').read_bytes()
     assert nro[16:20] == b'NRO0', 'Invalid NRO header'
@@ -45,6 +57,7 @@ def main():
         'switch/SwitchMusic/SwitchMusic.nro': args.build/'SwitchMusic.nro',
         'switch/.overlays/switchmusic.ovl': args.build/'switchmusic.ovl',
         f'atmosphere/contents/{TITLE:016X}/exefs.nsp': args.build/'switchmusic-sys.nsp',
+        f'atmosphere/contents/{TITLE:016X}/toolbox.json': ROOT/'sysmodule/toolbox.json',
         'config/switchmusic/config.example.json': ROOT/'config/config.example.json',
         'SwitchMusic-README.md': ROOT/'README.md',
         'SwitchMusic-VALIDATION.md': ROOT/'docs/VALIDATION.md',

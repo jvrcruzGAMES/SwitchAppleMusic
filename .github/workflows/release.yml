@@ -56,6 +56,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Use the preinstalled SDK/portlibs without contacting pkg.devkitpro.org.
     container: devkitpro/devkita64:latest
     steps:
       - uses: actions/checkout@v4
@@ -63,14 +64,6 @@ jobs:
           ref: ${{ needs.prepare.outputs.commit }}
           submodules: recursive
           persist-credentials: false
-      - name: Install build dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          dkp-pacman -Syu --noconfirm
-          dkp-pacman -S --needed --noconfirm \
-            switch-dev switch-cmake switch-curl switch-zlib switch-minizip \
-            switch-mbedtls switch-glm switch-libmpv switch-libplacebo switch-libjpeg-turbo
       - name: Build NRO, overlay and sysmodule
         shell: bash
         run: |

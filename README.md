@@ -52,6 +52,8 @@ Outputs are in `build-switch/`; the SD-card archive is `dist/SwitchMusic-sdcard.
 
 Open **Actions → Release SD card package → Run workflow**. Select the source branch, enter the desired **tag** (for example `v0.1.0`), optionally select **prerelease**, and run it.
 
+CI and release builds run in the prebuilt `devkitpro/devkita64:latest` Docker image, using its installed toolchain and Switch portlibs without running `dkp-pacman` or synchronizing devkitPro package repositories.
+
 The workflow builds all three Switch components and publishes a release containing **`sdout.zip`** and **`sdout.zip.sha256`**. Extract the ZIP directly to the SD root; it includes the `switch`, `atmosphere/contents/420000000000534D/flags`, and `config/switchmusic` folders. Your existing configuration is preserved; configure the supplied example for your backend. Boot activation remains manual as described below.
 
 A new tag points to the selected workflow source commit. If the tag already exists, its exact commit is built instead. Existing releases are not overwritten. The workflow uses GitHub's built-in token and needs no additional repository secret. Creating/pushing a tag alone does not trigger this workflow.

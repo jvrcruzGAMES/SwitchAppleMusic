@@ -59,18 +59,25 @@ bool process(const std::function<std::string(std::string_view)> &handler) {
     }
     u32 size;
     std::memcpy(&size, cmif + 1, sizeof(size));
-    const auto &input = request.data.send_buffers[0];
-    const auto &output = request.data.recv_buffers[0];
+    // Descriptors live in the thread's shared IPC/TLS buffer. The handler uses
+    // FS/other services, which overwrite that buffer before the reply is sent.
+    // Snapshot values and pointers before invoking any application code.
+    const auto input = request.data.send_buffers[0];
+    const auto output = request.data.recv_buffers[0];
+    const auto *source = static_cast<const char *>(hipcGetBufferAddress(&input));
+    auto *destination = hipcGetBufferAddress(&output);
     size_t capacity = hipcGetBufferSize(&output);
     if (input.mode != HipcBufferMode_Normal || output.mode != HipcBufferMode_Normal || !size ||
         size > MaxControlBytes || size != hipcGetBufferSize(&input) || !capacity ||
-        capacity > MaxControlBytes) {
+        capacity > MaxControlBytes || !source || !destination) {
         reply(BadInput);
         return true;
     }
     std::string result;
     try {
-        result = handler(std::string_view(static_cast<const char *>(hipcGetBufferAddress(&input)), size));
+        // Own the request bytes across nested service calls as well.
+        const std::string body(source, size);
+        result = handler(body);
     } catch (...) {
         result = R"({"error":"Playback IPC request failed"})";
     }
@@ -78,7 +85,7 @@ bool process(const std::function<std::string(std::string_view)> &handler) {
         reply(BadInput);
         return true;
     }
-    std::memcpy(hipcGetBufferAddress(&output), result.data(), result.size());
+    std::memcpy(destination, result.data(), result.size());
     reply(0, static_cast<u32>(result.size()));
     return true;
 }

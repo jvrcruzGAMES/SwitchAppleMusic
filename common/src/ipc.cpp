@@ -1,5 +1,6 @@
 #include <switchmusic/client.hpp>
 #include <switchmusic/ipc.hpp>
+#include <cstdio>
 #ifdef __SWITCH__
 #include <switch.h>
 #include <vector>
@@ -14,8 +15,14 @@ Json control(const Config &config, Json request) {
         // per call so a live Toolbox restart never leaves a cached dead session.
         Handle handle = INVALID_HANDLE;
         Result rc = svcConnectToNamedPort(&handle, ControlServiceName);
-        if (R_FAILED(rc))
-            return error("SwitchMusic sysmodule unavailable; enable it in Toolbox");
+        if (R_FAILED(rc)) {
+            char code[16];
+            std::snprintf(code, sizeof(code), "0x%08x", unsigned(R_VALUE(rc)));
+            if (R_VALUE(rc) == KERNELRESULT(NotFound) || R_VALUE(rc) == KERNELRESULT(ConnectionRefused))
+                return error("SwitchMusic IPC service unavailable (" + std::string(code) +
+                             "); restart the sysmodule in Toolbox");
+            return error("SwitchMusic IPC connection failed (" + std::string(code) + ")");
+        }
         struct Session {
             Handle handle;
             ~Session() { svcCloseHandle(handle); }
@@ -28,8 +35,11 @@ Json control(const Config &config, Json request) {
                                   .buffer_attrs = {SfBufferAttr_HipcMapAlias | SfBufferAttr_In,
                                                    SfBufferAttr_HipcMapAlias | SfBufferAttr_Out},
                                   .buffers = {{input.data(), input.size()}, {output.data(), output.size()}});
-        if (R_FAILED(rc))
-            return error("SwitchMusic IPC request failed; retry after enabling the sysmodule");
+        if (R_FAILED(rc)) {
+            char code[16];
+            std::snprintf(code, sizeof(code), "0x%08x", unsigned(R_VALUE(rc)));
+            return error("SwitchMusic IPC request failed (" + std::string(code) + ")");
+        }
         if (!written || written > output.size())
             return error("Invalid IPC response size");
         return decodeControlMessage(std::string_view(output.data(), written));

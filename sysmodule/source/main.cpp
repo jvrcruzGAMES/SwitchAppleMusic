@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #ifndef SWITCHMUSIC_HEAP_MB
 #define SWITCHMUSIC_HEAP_MB 8
 #endif
@@ -50,12 +51,13 @@ class Player {
     Json state={{"status","stopped"},{"position",0.0},{"duration",0.0},{"volume",70.0},{"paused",false}};
     Json queue=Json::array();size_t index=0;std::string nextPath,manifest;
     std::unique_ptr<AudioDecoder> decoder;std::unique_ptr<AudioOutput> output;
+    std::atomic<bool> shuttingDown{false};
     std::atomic<uint64_t> revision{0};uint64_t operation=0;
     bool paused=false,draining=false,started=false;double volume=70,resumePosition=0;
     std::chrono::steady_clock::time_point lastCredentials{};
     void update(Json values){std::lock_guard guard(lock);state.update(values);}
     bool cancelled(){
-        if(revision.load()!=operation)return true;
+        if(shuttingDown.load()||revision.load()!=operation)return true;
         auto now=std::chrono::steady_clock::now();
         if(now-lastCredentials>std::chrono::seconds(1)){
             lastCredentials=now;try{auto current=Config::load();if(current.session!=config.session||current.backend!=config.backend)return true;}catch(...){return true;}
@@ -117,6 +119,7 @@ class Player {
     }
     void interrupted(){resumePosition=output->position();output->reset(resumePosition);decoder.reset();started=draining=false;}
 public:
+    void shutdown(){shuttingDown=true;++revision;}
     Json request(const Json& j) {
         if(j.value("op",std::string{})=="artwork")return artwork.chunk(j);
         std::lock_guard guard(lock);
@@ -140,7 +143,7 @@ public:
         try{
             output=std::make_unique<AudioOutput>();output->volume(volume);
             auto lastConfig=std::chrono::steady_clock::time_point{};
-            while(true){
+            while(!shuttingDown.load()){
                 Json next;{std::lock_guard guard(lock);if(!commands.empty()){next=std::move(commands.front());commands.pop_front();}}
                 try{
                     auto now=std::chrono::steady_clock::now();
@@ -157,6 +160,7 @@ public:
                 catch(const std::exception& e){stop();update({{"status","error"},{"error",e.what()}});}
                 svcSleepThread(5000000);
             }
+            stop();
         }catch(const std::exception& e){update({{"status","error"},{"error",e.what()}});}
     }
 };
@@ -171,14 +175,20 @@ int main() {
         if(R_FAILED(rc))throw std::runtime_error("Cannot register SwitchMusic IPC port");
         controlPortRegistered=true;
         std::thread worker([&]{player.run();});
-        rc=runControlServer(port,[&](std::string_view raw){
-            try {
-                auto config=Config::load();
-                return dispatchControlMessage(raw,config.session,[&](const Json& request){return player.request(request);});
-            }catch(const std::exception& e){return encodeControlReply(error(e.what()));}
-        });
-        // A fatal kernel server error must stop the worker and all audio services
-        // with the process; never unwind a live worker referencing stack objects.
-        diagAbortWithResult(rc);
+        try{
+            rc=runControlServer(port,[&](std::string_view raw){
+                try {
+                    auto config=Config::load();
+                    return dispatchControlMessage(raw,config.session,[&](const Json& request){return player.request(request);});
+                }catch(const std::exception& e){return encodeControlReply(error(e.what()));}
+            });
+        }catch(...){rc=MAKERESULT(Module_Libnx,LibnxError_BadInput);}
+        // Exit this module cleanly on a server failure; never turn a recoverable
+        // control-channel error into a fatal system report or unwind a live worker.
+        Handle unused;svcManageNamedPort(&unused,ControlServiceName,0);controlPortRegistered=false;
+        player.shutdown();worker.join();svcCloseHandle(port);
+        char message[96];std::snprintf(message,sizeof(message),"IPC server stopped: 0x%08x",unsigned(R_VALUE(rc)));
+        std::ofstream("sdmc:/config/switchmusic/fatal.log")<<message;
+        return 1;
     }catch(const std::exception& e){std::ofstream("sdmc:/config/switchmusic/fatal.log")<<e.what();return 1;}
 }

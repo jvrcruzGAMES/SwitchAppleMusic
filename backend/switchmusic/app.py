@@ -82,7 +82,9 @@ def create_app(settings=None,transport=None):
     async def response_headers(request,call_next):
         response=await call_next(request)
         response.headers['X-Content-Type-Options']='nosniff'
-        response.headers['Referrer-Policy']='same-origin'
+        # MusicKit's cross-origin authorization popup needs the opener origin.
+        # Send no path, query or QR capability in the referrer.
+        response.headers['Referrer-Policy']='strict-origin'
         response.headers['Cache-Control']='private, no-store'
         return response
 

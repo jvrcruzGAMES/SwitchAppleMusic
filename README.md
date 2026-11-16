@@ -112,3 +112,5 @@ To disable the module immediately, toggle **SwitchMusic → Off** in Hekate Tool
 The original project code is MIT licensed. Dependencies retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md). Apple Music, Nintendo Switch and Musixmatch are their respective owners' marks; this project is independent.
 
 Architecture, control protocol, API and trust boundaries: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+If Apple accepts the developer JWT but MusicKit reports `Unauthorized` immediately after **Allow**, check the website’s response headers: use `Referrer-Policy: strict-origin`. A reverse proxy or browser privacy setting that replaces it with `same-origin` or `no-referrer` can prevent Apple’s popup from returning the Music User Token. The backend sends `strict-origin`, which shares only the origin, never a QR capability, path or query string.

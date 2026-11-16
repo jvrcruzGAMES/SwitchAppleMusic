@@ -86,3 +86,12 @@ async def test_preflight_cached_without_extending_signed_token_expiry(settings):
         one=await apple.authorization_token();two=await apple.authorization_token()
         assert one==two and len(requests)==1
         assert one['expires_at']==jwt.decode(one['developer_token'],options={'verify_signature':False})['exp']
+
+
+def test_musickit_popup_receives_origin_only_referrer_policy(settings):
+    with TestClient(create_app(settings,httpx.MockTransport(lambda request:httpx.Response(200,json={})))) as client:
+        for path in ('/', '/assets/app.js'):
+            response=client.get(path)
+            assert response.status_code==200
+            assert response.headers['Referrer-Policy']=='strict-origin'
+            assert response.headers['Cache-Control']=='private, no-store'

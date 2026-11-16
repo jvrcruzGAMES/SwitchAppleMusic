@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from switchmusic.app import create_app
 from switchmusic.settings import Settings
-from switchmusic.lyrics import parse_subtitles
+from switchmusic.lyrics import parse_lrc
 from switchmusic.playback import Playback
 
 TOKEN = 'device-' + 'x' * 40
@@ -70,14 +70,17 @@ def test_library_catalog_resolution(client):
     assert r.json()['stream_path'] == '/v1/stream/123'
     assert r.json()['id'] == '123'
 
-def test_lyrics_require_licensed_key(client):
-    r = client.get('/v1/lyrics/123', headers=HEADERS)
-    assert r.status_code == 503
-    assert 'Musixmatch' in r.text
-
-def test_subtitle_timing():
-    body=json.dumps([{'time': {'total':2.25}, 'text':'later'}, {'time': {'minutes':0,'seconds':1,'hundredths':5}, 'text':'first'}])
-    assert parse_subtitles(body) == [{'time_ms':1050,'text':'first'},{'time_ms':2250,'text':'later'}]
+def test_lyrics_without_api_key(client, monkeypatch):
+    calls=[]
+    def search(query, **kwargs):
+        calls.append((query,kwargs))
+        return '[00:01.05]first\n[00:02.250]later'
+    monkeypatch.setattr('switchmusic.lyrics.syncedlyrics.search',search)
+    r=client.get('/v1/lyrics/123',headers=HEADERS)
+    assert r.status_code==200
+    assert r.json()['provider']=='syncedlyrics'
+    assert r.json()['lines']==[{'time_ms':1050,'text':'first'},{'time_ms':2250,'text':'later'}]
+    assert calls==[('Song Artist',{'synced_only':True})]
 
 def test_range_requests(client):
     async def render(song_id, target):

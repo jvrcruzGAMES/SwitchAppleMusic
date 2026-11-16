@@ -8,7 +8,7 @@ flowchart LR
   SYS -->|"Resolve + stage audio"| API
   API -->|"Official catalog/library API"| APPLE["api.music.apple.com"]
   API -->|"Private HTTP + WV2D sample protocol"| WRAP["wrapper-v2"]
-  API -->|"Official subtitle API"| MXM["Musixmatch"]
+  API -->|"syncedlyrics package · timed lyrics only"| LRC["Lyric providers"]
   SYS --> AUDIO["HOS audio renderer"]
 ```
 
@@ -62,7 +62,7 @@ All `/v1/` routes require `Authorization: Bearer <DEVICE_TOKEN>`. `/health` is a
 | `GET /v1/stream/{numeric_catalog_id}` | Decrypted fMP4; supports HTTP Range |
 | `GET /v1/lyrics/{catalog_id}` | `{provider,copyright,tracking_url,lines:[{time_ms,text}]}` |
 
-Resources are normalized to IDs, resource type, title, artist, album, duration, catalog ID and ISRC. Raw wrapper snapshots and Apple responses are never forwarded. Library uploads without catalog counterparts are reported as unavailable. Synchronized lyric access depends on the Musixmatch key's plan and track availability. Provider copyright is displayed. Review your provider agreement's attribution, reporting and tracking requirements before distribution; the generic client does not implement provider-specific analytics pixels or territory policy enforcement.
+Resources are normalized to IDs, resource type, title, artist, album, duration, catalog ID and ISRC. Raw wrapper snapshots and Apple responses are never forwarded. Library uploads without catalog counterparts are reported as unavailable. All lyric searches go through the `syncedlyrics` Python package with `synced_only=True`, matching title and artist. No Musixmatch API key is read or required. The blocking search runs outside the API event loop. LRC timestamps (including offsets and repeated timestamps) are normalized to milliseconds; metadata is ignored and plaintext is never assigned invented timing. Missing synchronized lyrics return 404, and package exceptions return a sanitized 502. The response identifies `syncedlyrics`; it does not claim an upstream provider that the package does not report. Docker sets `HOME=/tmp` so its provider cache stays on writable tmpfs.
 
 ## Secrets and hosting
 
@@ -78,5 +78,5 @@ The sysmodule NPDM currently uses development-template filesystem/service permis
 - [Media Services keys](https://developer.apple.com/help/account/capabilities/create-a-media-identifier-and-private-key/).
 - [wrapper-v2 HTTP and WV2D protocols](https://github.com/glomatico/wrapper-v2).
 - [Gamdl streaming implementation](https://github.com/glomatico/gamdl).
-- [Musixmatch developer portal](https://developer.musixmatch.com/).
+- [syncedlyrics package](https://github.com/moehmeni/syncedlyrics).
 - [libultrahand](https://github.com/ppkantorski/libultrahand) and [Borealis](https://github.com/dragonflylee/borealis).

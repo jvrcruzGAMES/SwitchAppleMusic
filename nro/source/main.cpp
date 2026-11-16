@@ -89,7 +89,7 @@ public:
         button(body,"Volume −5",[this]{command({{"op","volume"},{"value",state.value("volume",70.0)-5}});});
         button(body,"Volume +5",[this]{command({{"op","volume"},{"value",state.value("volume",70.0)+5}});});
         button(body,"Stop",[this]{command({{"op","stop"}});});
-        lyric=label("Synchronized lyrics",28);lyric->setTextColor(nvgRGB(250,55,90));nearby=label("");credit=label("Musixmatch",16);
+        lyric=label("Synchronized lyrics",28);lyric->setTextColor(nvgRGB(250,55,90));nearby=label("");credit=label("syncedlyrics",16);
         lyricId.clear();lines=Json::array();focus();renderState();
     }
     void renderState(){
@@ -112,7 +112,7 @@ public:
             else if(d.job.generation==generation) {
                 if(d.result.contains("error")) {if(d.job.type=="lyrics"&&lyric)lyric->setText(d.result["error"]);else{clear();label(d.result["error"]);button(body,"Retry",[this]{browse(currentPath,kind);});focus();}}
                 else if(d.job.type=="page")showPage(d.result);
-                else if(d.job.type=="lyrics"&&lyric&&d.job.path=="/v1/lyrics/"+encode(lyricId)){lines=d.result.value("lines",Json::array());credit->setText("Musixmatch  "+d.result.value("copyright",std::string{}));if(lines.empty())lyric->setText("No synchronized lyrics available");renderState();}
+                else if(d.job.type=="lyrics"&&lyric&&d.job.path=="/v1/lyrics/"+encode(lyricId)){lines=d.result.value("lines",Json::array());credit->setText(d.result.value("provider",std::string("syncedlyrics"))+"  "+d.result.value("copyright",std::string{}));if(lines.empty())lyric->setText("No synchronized lyrics available");renderState();}
             }
         }
         auto current=Clock::now();if(!polling&&current-lastPoll>std::chrono::milliseconds(500)){lastPoll=current;polling=net.submit({"state","",{{"op","state"}},generation});}

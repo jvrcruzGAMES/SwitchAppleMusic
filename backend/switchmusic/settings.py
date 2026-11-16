@@ -13,7 +13,6 @@ class Settings:
     decrypt_host: str = "wrapper"
     decrypt_port: int = 10020
     storefront: str = "us"
-    musixmatch_key: str = ""
     cache_dir: Path = Path("/tmp/switchmusic-cache")
     max_cache_bytes: int = 512 * 1024 * 1024
     max_track_bytes: int = 256 * 1024 * 1024
@@ -32,7 +31,6 @@ class Settings:
                    decrypt_host=os.environ.get("WRAPPER_DECRYPT_HOST", "wrapper"),
                    decrypt_port=int(os.environ.get("WRAPPER_DECRYPT_PORT", "10020")),
                    storefront=os.environ.get("APPLE_STOREFRONT", "us"),
-                   musixmatch_key=os.environ.get("MUSIXMATCH_API_KEY", ""),
                    cache_dir=Path(os.environ.get("CACHE_DIR", "/tmp/switchmusic-cache")),
                    max_track_bytes=int(os.environ.get("MAX_TRACK_BYTES", str(256 * 1024 * 1024))),
                    max_cache_bytes=int(os.environ.get("MAX_CACHE_BYTES", str(512 * 1024 * 1024))))

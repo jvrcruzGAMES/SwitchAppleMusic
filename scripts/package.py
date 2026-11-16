@@ -22,6 +22,34 @@ def pfs_entries(data):
         files[name] = data[payload + offset:payload + offset + size]
     return files
 
+def romfs_file(image, name):
+    assert len(image)>=80, 'Truncated certificate RomFS'
+    header=struct.unpack_from('<10Q',image)
+    assert header[0]==80, 'Invalid RomFS header'
+    table,end=header[7],header[7]+header[8]
+    assert end<=len(image), 'Invalid RomFS file table'
+    while table<end:
+        _,_,offset,size,_,length=struct.unpack_from('<IIQQII',image,table)
+        filename=image[table+32:table+32+length].decode()
+        if filename==name:
+            start=header[9]+offset
+            assert start+size<=len(image), 'Truncated RomFS certificate'
+            return image[start:start+size]
+        table+=(32+length+3)&~3
+    raise AssertionError('Missing bundled '+name)
+
+def validate_certificates(build,nro):
+    size=struct.unpack_from('<I',nro,0x18)[0]
+    assert nro[size:size+4]==b'ASET', 'Missing NRO assets'
+    offset,length=struct.unpack_from('<QQ',nro,size+0x28)
+    embedded=nro[size+offset:size+offset+length]
+    module=(build/'switchmusic-sys.romfs').read_bytes()
+    expected=(ROOT/'resources/certs/cacert.pem').read_bytes()
+    assert expected.count(b'-----BEGIN CERTIFICATE-----')>100, 'Incomplete CA trust store'
+    for image in (embedded,module):
+        assert romfs_file(image,'cacert.pem')==expected, 'Bundled CA trust store differs from source'
+        assert romfs_file(image,'LICENSE.txt')==(ROOT/'resources/certs/LICENSE.txt').read_bytes(), 'Missing CA license'
+
 def validate_toolbox(path):
     metadata = json.loads(path.read_text())
     if not isinstance(metadata, dict) or not isinstance(metadata.get('name'), str) or not metadata['name'].strip():
@@ -38,6 +66,7 @@ def validate(build):
     nro = (build / 'SwitchMusic.nro').read_bytes()
     ovl = (build / 'switchmusic.ovl').read_bytes()
     assert nro[16:20] == b'NRO0', 'Invalid NRO header'
+    validate_certificates(build,nro)
     assert ovl[16:20] == b'NRO0' and ovl[-4:] == b'ULTR', 'Invalid overlay/signature'
     entries = pfs_entries((build / 'switchmusic-sys.nsp').read_bytes())
     assert entries['main'][:4] == b'NSO0', 'Invalid sysmodule NSO'
@@ -57,6 +86,8 @@ def main():
         'switch/SwitchMusic/SwitchMusic.nro': args.build/'SwitchMusic.nro',
         'switch/.overlays/switchmusic.ovl': args.build/'switchmusic.ovl',
         f'atmosphere/contents/{TITLE:016X}/exefs.nsp': args.build/'switchmusic-sys.nsp',
+        f'atmosphere/contents/{TITLE:016X}/romfs.bin': args.build/'switchmusic-sys.romfs',
+        'SwitchMusic-LICENSES/mozilla-ca.txt': ROOT/'resources/certs/LICENSE.txt',
         f'atmosphere/contents/{TITLE:016X}/toolbox.json': ROOT/'sysmodule/toolbox.json',
         'config/switchmusic/config.example.json': ROOT/'config/config.example.json',
         'SwitchMusic-README.md': ROOT/'README.md',

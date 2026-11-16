@@ -41,7 +41,9 @@ class Apple:
             r = await self.http.get("https://api.music.apple.com/v1/" + path,
                                     params=params, headers=headers)
             if r.status_code in (401, 403):
-                raise HTTPException(r.status_code, "Apple Music authorization expired or denied")
+                if path.startswith("me/"):
+                    raise HTTPException(409, "Apple Music authorization expired or denied; relink your library on the website")
+                raise HTTPException(502, "Apple Music server authorization failed")
             if r.status_code == 404:
                 raise HTTPException(404, "Apple Music resource unavailable")
             r.raise_for_status()

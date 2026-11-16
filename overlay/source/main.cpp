@@ -21,11 +21,11 @@ public:
         add(list,"Volume +5",[this]{return Json{{"op","volume"},{"value",state.value("volume",70.0)+5}};});
         add(list,"Stop",[]{return Json{{"op","stop"}};});frame->setContent(list);return frame;
     }
-    void update() override {auto now=std::chrono::steady_clock::now();if(!configured||now-last<std::chrono::milliseconds(750))return;last=now;
-        try {state=control(config,{{"op","state"}});if(state.contains("error")&&!state["error"].get<std::string>().empty()){title->setText(state["error"]);return;}
+    void update() override {auto now=std::chrono::steady_clock::now();if(now-last<std::chrono::milliseconds(750))return;last=now;
+        try {config=Config::load();configured=true;state=control(config,{{"op","state"}});if(state.contains("error")&&!state["error"].get<std::string>().empty()){title->setText(state["error"]);return;}
             auto song=state.value("track",Json::object());title->setText(song.value("title",std::string("Nothing playing")));title->setValue(state.value("paused",false)?"Paused":state.value("status",std::string{}));
             int sec=int(state.value("position",0.0));progress->setText(song.value("artist",std::string{}));progress->setValue(std::to_string(sec/60)+":"+(sec%60<10?"0":"")+std::to_string(sec%60)+"  "+std::to_string(int(state.value("volume",70.0)))+"%");
-        }catch(...){title->setText("Invalid playback state");}
+        }catch(const std::exception& e){configured=false;title->setText(e.what());}
     }
 };
 class MusicOverlay:public tsl::Overlay {

@@ -12,6 +12,7 @@
 #include <deque>
 #include <fstream>
 #include <algorithm>
+#include <chrono>
 #ifndef SWITCHMUSIC_HEAP_MB
 #define SWITCHMUSIC_HEAP_MB 32
 #endif
@@ -33,7 +34,7 @@ void __appInit() {
     fsdevMountSdmc();timeInitialize();__libnx_init_time();
     Result rc=socketInitializeDefault();if(R_FAILED(rc))diagAbortWithResult(rc);
 }
-void __appExit() {socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
+void __appExit() {romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
 }
 class Player {
     Config config;
@@ -45,6 +46,13 @@ class Player {
     void check(int rc) { if(rc<0)throw std::runtime_error(mpv_error_string(rc)); }
     void command(std::initializer_list<const char*> args) {std::vector<const char*> v(args);v.push_back(nullptr);check(mpv_command(mpv,v.data()));}
     void update(Json values) {std::lock_guard guard(lock);state.update(values);}
+    void syncConfig(){
+        Config next;try{next=Config::load();}catch(...){}
+        if(next.backend!=config.backend||next.username!=config.username||next.session!=config.session){
+            command({"stop"});queue=Json::array();index=0;nextPath.clear();activeEntry=-1;config=std::move(next);
+            update({{"status",config.session.empty()?"signed out":"stopped"},{"track",Json::object()},{"position",0.0},{"duration",0.0},{"error",""},{"http_status",0}});
+        }
+    }
     void load() {
         if(queue.empty()||index>=queue.size()) {command({"stop"});update({{"status","stopped"}});return;}
         update({{"status","loading"},{"error",""},{"queue_index",index},{"queue_size",queue.size()}});
@@ -70,6 +78,7 @@ class Player {
         command({"stop"});update({{"status","stopped"}});
     }
     void act(const Json& j) {
+        if(config.session.empty()||j.value("session",std::string{})!=config.session)return;
         auto op=j.at("op").get<std::string>();
         if(op=="play") {queue=j.at("queue");index=j.value("index",size_t(0));nextPath=j.value("next_path",std::string{});load();}
         else if(op=="next") {advance();}
@@ -80,7 +89,7 @@ class Player {
         else if(op=="volume") {double value=std::clamp(j.at("value").get<double>(),0.0,100.0);check(mpv_set_property(mpv,"volume",MPV_FORMAT_DOUBLE,&value));}
     }
 public:
-    explicit Player(Config c):config(std::move(c)){}
+    Player()=default;
     Json request(const Json& j) {
         std::lock_guard guard(lock);
         if(j.value("op",std::string{})=="state")return state;
@@ -108,15 +117,21 @@ public:
             check(mpv_set_option_string(mpv,"terminal","no"));
             check(mpv_set_option_string(mpv,"volume","70"));
             check(mpv_initialize(mpv));
+            auto lastConfig=std::chrono::steady_clock::time_point{};
             while(true) {
                 Json next;
                 {std::lock_guard guard(lock);if(!commands.empty()){next=std::move(commands.front());commands.pop_front();}}
-                try {if(!next.is_null())act(next);}catch(const std::exception& e){update({{"status","error"},{"error",e.what()}});}
+                try {
+                    auto now=std::chrono::steady_clock::now();
+                    if(!next.is_null()||now-lastConfig>std::chrono::seconds(1)){syncConfig();lastConfig=now;}
+                    if(!next.is_null())act(next);
+                }catch(const HttpError& e){update({{"status","error"},{"error",e.what()},{"http_status",e.status}});}
+                catch(const std::exception& e){update({{"status","error"},{"error",e.what()}});}
                 auto* event=mpv_wait_event(mpv,0.05);
                 if(event->event_id==MPV_EVENT_END_FILE) {
                     auto* end=static_cast<mpv_event_end_file*>(event->data);
                     if(end->playlist_entry_id!=activeEntry)continue;
-                    if(end->reason==MPV_END_FILE_REASON_EOF) {try {advance();}catch(const std::exception& e){update({{"status","error"},{"error",e.what()}});}}
+                    if(end->reason==MPV_END_FILE_REASON_EOF) {try {advance();}catch(const HttpError& e){update({{"status","error"},{"error",e.what()},{"http_status",e.status}});}catch(const std::exception& e){update({{"status","error"},{"error",e.what()}});}}
                     else if(end->reason==MPV_END_FILE_REASON_ERROR)update({{"status","error"},{"error",mpv_error_string(end->error)}});
                 }
                 double pos=0,dur=0,vol=70;int paused=0;
@@ -134,7 +149,8 @@ public:
 int main() {
     try {
         mkdir("sdmc:/config/switchmusic",0777);curl_global_init(CURL_GLOBAL_DEFAULT);
-        auto config=Config::load();Player player(config);
+        if(R_FAILED(romfsMountFromFsdev("sdmc:/atmosphere/contents/420000000000534D/romfs.bin",0,"romfs")))throw std::runtime_error("Reinstall SwitchMusic: bundled certificate RomFS is missing");
+        Player player;
         int server=socket(AF_INET,SOCK_STREAM,0);if(server<0)throw std::runtime_error("Control socket failed");
         sockaddr_in addr{};addr.sin_family=AF_INET;addr.sin_port=htons(ControlPort);addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
         int yes=1;setsockopt(server,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes));
@@ -145,9 +161,10 @@ int main() {
             timeval tv{0,300000};setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
             Json request;
             try {if(receiveFrame(fd,request)) {
-                if(request.value("version",0)!=1||(request.value("username",std::string{})!=config.username||request.value("password",std::string{})!=config.password))sendFrame(fd,error("Invalid control credentials/version"));
+                auto config=Config::load();
+                if(request.value("version",0)!=2||request.value("session",std::string{})!=config.session)sendFrame(fd,error("Open SwitchMusic to sign in again"));
                 else sendFrame(fd,player.request(request));
-            }}catch(...){sendFrame(fd,error("Malformed request"));}close(fd);
+            }}catch(const std::exception& e){sendFrame(fd,error(e.what()));}catch(...){sendFrame(fd,error("Malformed request"));}close(fd);
         }
     }catch(const std::exception& e){std::ofstream("sdmc:/config/switchmusic/fatal.log")<<e.what();return 1;}
 }

@@ -20,12 +20,20 @@ target_link_libraries(switchmusic_common PUBLIC PkgConfig::CURL ${CURL_STATIC_LI
 add_executable(SwitchMusic nro/source/main.cpp third_party/borealis/library/lib/platforms/switch/switch_wrapper.c)
 target_link_libraries(SwitchMusic PRIVATE switchmusic_common borealis)
 file(COPY ${CMAKE_SOURCE_DIR}/third_party/borealis/resources/ DESTINATION ${CMAKE_BINARY_DIR}/romfs)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/romfs/certs)
+configure_file(resources/certs/cacert.pem ${CMAKE_BINARY_DIR}/romfs/certs/cacert.pem COPYONLY)
+configure_file(resources/certs/LICENSE.txt ${CMAKE_BINARY_DIR}/romfs/certs/LICENSE.txt COPYONLY)
 gen_dksh(${CMAKE_BINARY_DIR}/romfs/shaders)
 add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/SwitchMusic.nro
     COMMAND ${NX_NACPTOOL_EXE} --create "SwitchMusic" "SwitchMusic contributors" "0.1.0" ${CMAKE_BINARY_DIR}/SwitchMusic.nacp
     COMMAND ${NX_ELF2NRO_EXE} $<TARGET_FILE:SwitchMusic> ${CMAKE_BINARY_DIR}/SwitchMusic.nro --nacp=${CMAKE_BINARY_DIR}/SwitchMusic.nacp --romfsdir=${CMAKE_BINARY_DIR}/romfs
-    DEPENDS SwitchMusic)
+    DEPENDS SwitchMusic ${CMAKE_BINARY_DIR}/romfs/certs/cacert.pem ${CMAKE_BINARY_DIR}/romfs/certs/LICENSE.txt)
 add_custom_target(nro ALL DEPENDS ${CMAKE_BINARY_DIR}/SwitchMusic.nro)
+find_program(NX_BUILD_ROMFS_EXE build_romfs HINTS "$ENV{DEVKITPRO}/tools/bin" REQUIRED)
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/switchmusic-sys.romfs
+    COMMAND ${NX_BUILD_ROMFS_EXE} ${CMAKE_SOURCE_DIR}/resources ${CMAKE_BINARY_DIR}/switchmusic-sys.romfs
+    DEPENDS ${CMAKE_SOURCE_DIR}/resources/certs/cacert.pem ${CMAKE_SOURCE_DIR}/resources/certs/LICENSE.txt ${CMAKE_SOURCE_DIR}/resources/certs/README.md)
+add_custom_target(sysmodule-romfs ALL DEPENDS ${CMAKE_BINARY_DIR}/switchmusic-sys.romfs)
 set(SWITCHMUSIC_HEAP_MB 32 CACHE STRING "Sysmodule heap in MiB")
 add_executable(switchmusic-sys sysmodule/source/main.cpp)
 target_compile_definitions(switchmusic-sys PRIVATE SWITCHMUSIC_HEAP_MB=${SWITCHMUSIC_HEAP_MB})
@@ -38,6 +46,7 @@ add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/switchmusic-sys.nsp
     COMMAND ${NX_BUILD_PFS0_EXE} ${CMAKE_BINARY_DIR}/exefs ${CMAKE_BINARY_DIR}/switchmusic-sys.nsp
     DEPENDS switchmusic-sys ${CMAKE_SOURCE_DIR}/sysmodule/sysmodule.json)
 add_custom_target(sysmodule ALL DEPENDS ${CMAKE_BINARY_DIR}/switchmusic-sys.nsp)
+add_dependencies(sysmodule sysmodule-romfs)
 file(GLOB ULTRA_SRC CONFIGURE_DEPENDS third_party/libultrahand/common/*.cpp third_party/libultrahand/common/*.c third_party/libultrahand/libultra/source/*.cpp third_party/libultrahand/libtesla/source/*.cpp)
 add_executable(switchmusic-overlay overlay/source/main.cpp ${ULTRA_SRC})
 set_target_properties(switchmusic-overlay PROPERTIES CXX_STANDARD 26)

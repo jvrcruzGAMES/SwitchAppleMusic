@@ -34,7 +34,7 @@ Packaging validates the Toolbox display name, exact title ID and live-toggle fla
 
 ## Local control wire format
 
-Every connection carries one request and one response. Each frame is a **4-byte big-endian unsigned JSON byte length**, followed by UTF-8 JSON. Maximum payload: 65536 bytes. Malformed/oversized frames are rejected. Requests must include `version: 1`, `username` and `password`, matching the backend account credentials in the shared SD configuration. The listener accepts only loopback connections.
+Every connection carries one request and one response. Each frame is a **4-byte big-endian unsigned JSON byte length**, followed by UTF-8 JSON. Maximum payload: 65536 bytes. Malformed/oversized frames are rejected. Requests must include `version: 2` and `session`, matching the saved backend session in the shared SD configuration. The listener accepts only loopback connections.
 
 | `op` | Additional request fields | Response |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ This is a local socket protocol, not a registered Horizon CMIF service. Loopback
 
 ## Backend API
 
-All `/v1/` routes require an active backend account: HTTP Basic authentication for native clients, or a signed-in browser cookie. The login shell, static assets and `/health` are public. Browser sessions expire after 12 hours and use HttpOnly, SameSite=Strict cookies (Secure by default). Cookie-authenticated mutations require a session CSRF token; supplied Origins must match `PUBLIC_URL`. There is no generic Apple/wrapper proxy or public registration.
+All `/v1/` routes require an active backend account: a signed-in session cookie for native clients and browsers (HTTP Basic remains available for external API scripts). The login shell, static assets and `/health` are public. Browser sessions expire after 12 hours and use HttpOnly, SameSite=Strict cookies (Secure by default). Cookie-authenticated mutations require a session CSRF token; supplied Origins must match `PUBLIC_URL`. There is no generic Apple/wrapper proxy or public registration.
 
 | Route | Result |
 | --- | --- |
@@ -77,7 +77,11 @@ The server retains the Media Services private key and signs one-hour developer J
 
 Only the reserved admin can create, manage and delete accounts. Its password is bootstrapped from `ADMIN_PASSWORD` on the first start; later starts preserve the database password. Passwords use Argon2; random browser session tokens and linking nonces are stored as SHA-256 hashes. Failed logins are throttled. Disabled/deleted accounts and revoked sessions are rejected on subsequent requests. Password reset/change revokes browser sessions. No Apple password or 2FA code is collected. Wrapper authentication is administered separately on the host: playback uses its subscribed account, independently of each user's library token. Catalog-only backend accounts need no Apple link.
 
-The Switch stores a backend username/password, not an Apple token or developer key. Use HTTPS and protect the SD configuration; changing those credentials requires updating it. Browser sign-in uses cookies and CSRF protection, while native requests use HTTP Basic over TLS. No logs intentionally include authentication values. Docker disables Uvicorn access logs, runs non-root with a read-only root and bounded tmpfs audio cache, and persists accounts under `/data`. Compose uses the configured host UID/GID to read the mode-0600 Apple key and data files. Bring your own HTTPS reverse proxy, configure its public origin exactly, and keep wrapper control/decrypt ports private.
+The NRO presents server URL, username and masked password inputs using the Nintendo Switch keyboard applet. It calls `/auth/login`, receives the HttpOnly session through libcurl's cookie engine, and saves only the URL, username and session to SD. Passwords, Apple tokens and developer keys are not saved there. Saved sessions are validated at launch and every 30 seconds while the NRO runs. Backend 401 responses return it to login and clear authorization; an expired Apple library link returns 409 instead, leaving the backend account signed in. Logout removes local authorization and requests server revocation with the session's CSRF token. Protect the SD session and use HTTPS. Both native and browser sessions expire after 12 hours and are revoked by password changes, account disabling or deletion. Native API calls send the session cookie; no replacement device-token scheme is introduced. No logs intentionally include authentication values. Docker disables Uvicorn access logs, runs non-root with a read-only root and bounded tmpfs audio cache, and persists accounts under `/data`. Compose uses the configured host UID/GID to read the mode-0600 Apple key and data files. Bring your own HTTPS reverse proxy, configure its public origin exactly, and keep wrapper control/decrypt ports private.
+
+The sysmodule starts without a login and reloads saved session changes once per second and before queued commands. The listener checks the current saved session on each loopback request; the overlay reloads it on each poll. A session change stops playback and discards the previous queue; queued commands carry their originating session and cannot play under a different account. An in-flight download must return before the player worker can apply the change, as with other stop commands in this version.
+
+The NRO embeds `resources/certs/cacert.pem` in its RomFS. The sysmodule mounts its separately packaged certificate-only image at `atmosphere/contents/420000000000534D/romfs.bin` using libnx `romfsMountFromFsdev`; it does not depend on a homebrew NSP loader exposing RomFS. Both clients use `romfs:/certs/cacert.pem` with peer/hostname verification enabled. Packaging checks the exact certificate and MPL license bytes in both images. Updating the checked-in Mozilla/curl snapshot and rebuilding updates trust; no CA path is read from configuration.
 
 The sysmodule NPDM currently uses development-template filesystem/service permissions and broad syscall capabilities. It should be narrowed after hardware service tracing; it is not a minimal-permission production manifest.
 

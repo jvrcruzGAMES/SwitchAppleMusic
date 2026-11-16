@@ -103,7 +103,7 @@ def test_link_state_bound_to_user_and_session_and_consumed_once(website):
 def test_invalid_apple_token_does_not_create_a_link(website):
     create(website);headers=login(website)
     state=website.post('/auth/apple/start',headers=headers).json()['state']
-    assert website.post('/auth/apple/callback',headers=headers,json={'state':state,'music_user_token':'invalid'}).status_code==403
+    assert website.post('/auth/apple/callback',headers=headers,json={'state':state,'music_user_token':'invalid'}).status_code==409
     assert not website.get('/auth/me').json()['user']['apple_linked']
 
 def test_admin_reset_disable_delete_revoke_access(website):
@@ -146,3 +146,17 @@ def test_static_web_assets_and_cookie_flags(settings):
         response=client.post('/auth/login',json={'username':'admin','password':PASSWORD})
         cookie=response.headers['set-cookie'].lower()
         assert 'secure' in cookie and 'httponly' in cookie and 'samesite=strict' in cookie
+
+
+def test_expired_native_session_requires_login(website):
+    create(website);login(website)
+    with website.app.state.accounts.db() as db:db.execute('UPDATE sessions SET expires=0')
+    assert website.get('/auth/me').status_code==401
+    assert website.get('/v1/catalog/search?term=test').status_code==401
+
+
+def test_expired_apple_link_does_not_expire_backend_login(website):
+    uid=create(website);login(website)
+    website.app.state.accounts.link(uid,'invalid','us')
+    assert website.get('/v1/library/songs').status_code==409
+    assert website.get('/auth/me').status_code==200

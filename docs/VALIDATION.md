@@ -4,7 +4,9 @@
 
 - Cross-compiled and linked `SwitchMusic.nro`, `switchmusic.ovl`, and `switchmusic-sys.nsp` using devkitA64 GCC 16.1.0 and the installed libnx/portlibs.
 - Checked the overlay's trailing `ULTR` signature, NRO headers, NSP PFS0 entries, NSO header and NPDM program ID during packaging. Toolbox metadata is also validated against that ID and must declare live load/unload support.
-- The 61 backend tests exercise admin-only account creation, cookie CSRF/origin checks, password/session revocation, encrypted per-user library isolation, single-use MusicKit linking, catalog access without linking, persistence across restarts, and pagination, input validation, official Apple request headers, sanitized resource output, library-to-catalog resolution, keyless syncedlyrics lookup, LRC timestamps, HTTP byte ranges, serialized cache preparation, failure cleanup and cache budget eviction. Upstreams are mocked; these tests do not claim live account validation.
+- The 63 backend tests exercise admin-only account creation, cookie CSRF/origin checks, password/session revocation, encrypted per-user library isolation, single-use MusicKit linking, native session expiry, Apple-link expiry without backend logout, catalog access without linking, persistence across restarts, and pagination, input validation, official Apple request headers, sanitized resource output, library-to-catalog resolution, keyless syncedlyrics lookup, LRC timestamps, HTTP byte ranges, serialized cache preparation, failure cleanup and cache budget eviction. Upstreams are mocked; these tests do not claim live account validation.
+- The native libcurl integration test exercises password login, session-cookie capture, saved-session reuse, revocation, expiry, logout, URL validation, and migration without persisting passwords or CA paths.
+- Packaging verifies the identical CA bundle and its MPL license inside the NRO and certificate-only sysmodule RomFS. The bundle loads as 118 CA certificates through Python/OpenSSL.
 - Host C++ framing test covers round trips, fragmented frames, invalid JSON, maximum size enforcement and URL escaping.
 - Built the pinned Gamdl Rust/Python package under Python 3.12 and imported the adapter's API/model/stream classes. Its 17 synthetic wrapper-v2 TCP/fMP4 fixture tests passed.
 - Built the backend Docker image and smoke-tested non-root startup, a read-only root filesystem, native playback imports, HTTP health, unauthenticated route rejection, packaged web assets, account creation and account/session persistence across container restarts. Docker Compose configuration also parsed successfully.
@@ -19,7 +21,8 @@ The SDK here was missing GLM and libjpeg. They were built/staged under `/tmp` fo
 4. Play a real wrapper AAC rendition, exercise seek/pause/skip/volume, run through a multi-page playlist after closing the NRO, and verify failure reporting after network loss or expired account authorization.
 5. Verify live `syncedlyrics` searches and lyric synchronization across tracks and provider availability; no Musixmatch API key is required.
 6. In Hekate Toolbox, repeatedly toggle SwitchMusic On → Off → On while idle, playing and preparing a track. Verify process termination, audio renderer release, port rebinding, UI reconnection and `boot2.flag` persistence. Launch success remains subject to the memory constraint above.
-7. Visually validate the Borealis screens, controller/touch navigation, long track names and Ultrahand controls on-device. No emulator screenshots or simulated UI are presented as hardware evidence.
+7. Verify the NRO login screen on fresh installs, native keyboard/password masking and cancel, saved login on restart, server outages, 12-hour expiry and admin revocation, logout/relogin, and sysmodule/overlay credential reload. Verify trusted HTTPS on both clients using the packaged RomFS.
+8. Visually validate the Borealis screens, controller/touch navigation, long track names and Ultrahand controls on-device. No emulator screenshots or simulated UI are presented as hardware evidence.
 
 ## Current behavior and limits
 

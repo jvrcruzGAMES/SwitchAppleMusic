@@ -9,6 +9,8 @@
 #include <chrono>
 using namespace smusic;
 using Clock=std::chrono::steady_clock;
+static std::string pageBase(std::string path){auto offset=path.find("&offset=");if(offset==std::string::npos)offset=path.find("?offset=");if(offset!=std::string::npos)path.resize(offset);return path;}
+static std::string withOffset(const std::string& path,int offset){return pageBase(path)+(pageBase(path).find('?')==std::string::npos?"?":"&")+"offset="+std::to_string(offset);}
 struct Job {std::string type,path;Json request;unsigned generation=0;};
 struct Done {Job job;Json result;};
 class Network {
@@ -44,6 +46,7 @@ public:
         auto* root=new brls::Box(brls::Axis::COLUMN);root->setPadding(20);
         auto* menu=new brls::Box(brls::Axis::ROW);menu->setHeight(70);
         for(auto k:{"songs","albums","playlists"}){auto* b=button(menu,k,[this,k]{browse("/v1/library/"+std::string(k),k);});if(!navigationFocus)navigationFocus=b;}
+        button(menu,"Search",[this]{brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});
         button(menu,"Now playing",[this]{playing();});root->addView(menu);
         notice=new brls::Label();notice->setText("Connecting to your music server");notice->setFontSize(18);root->addView(notice);
         scroll=new brls::ScrollingFrame();scroll->setGrow(1);body=new brls::Box(brls::Axis::COLUMN);body->setPadding(16);scroll->setContentView(body);root->addView(scroll);
@@ -59,7 +62,7 @@ public:
         if(kind=="tracks")button(body,"Back to collections",[this]{browse("/v1/library/albums","albums");});
         if(items.empty())label("No items in this collection.");
         continuation.clear();
-        if(page.contains("next_offset")&&!page["next_offset"].is_null())continuation=currentPath.substr(0,currentPath.find('?'))+"?offset="+std::to_string(page["next_offset"].get<int>());
+        if(page.contains("next_offset")&&!page["next_offset"].is_null())continuation=withOffset(currentPath,page["next_offset"].get<int>());
         auto snapshot=items;auto nextPath=continuation;
         for(size_t i=0;i<items.size();++i){auto item=items[i];auto title=item.value("title",std::string("Untitled"));auto artist=item.value("artist",std::string{});
             button(body,title+(artist.empty()?"":"  ·  "+artist),[this,item,i,snapshot,nextPath]{
@@ -68,17 +71,18 @@ public:
                     Json queue=Json::array();size_t selected=0;
                     for(size_t x=0;x<snapshot.size();++x){auto t=snapshot[x].value("type",std::string{});if(t=="songs"||t=="library-songs"){if(x==i)selected=queue.size();queue.push_back({{"id",snapshot[x]["id"]},{"type",t}});}}
                     command({{"op","play"},{"queue",queue},{"index",selected},{"next_path",nextPath}});playing();
-                }else if(type=="library-albums"||type=="library-playlists") {
-                    auto collection=type=="library-albums"?"albums":"playlists";
-                    browse("/v1/library/"+std::string(collection)+"/"+encode(item.at("id"))+"/tracks","tracks");
+                }else if(type=="library-albums"||type=="library-playlists"||type=="albums"||type=="playlists") {
+                    auto collection=(type=="library-albums"||type=="albums")?"albums":"playlists";
+                    auto source=type.rfind("library-",0)==0?"library":"catalog";
+                    browse("/v1/"+std::string(source)+"/"+std::string(collection)+"/"+encode(item.at("id"))+"/tracks","tracks");
                 }else notice->setText("This item is not a playable song or collection");
             });
         }
         if(page.contains("next_offset")&&!page["next_offset"].is_null()) {
-            auto base=currentPath.substr(0,currentPath.find('?'));auto next=page["next_offset"].get<int>();auto type=kind;
-            button(body,"Next page →",[this,base,next,type]{browse(base+"?offset="+std::to_string(next),type);});
+            auto base=pageBase(currentPath);auto next=page["next_offset"].get<int>();auto type=kind;
+            button(body,"Next page →",[this,base,next,type]{browse(base+(base.find('?')==std::string::npos?"?":"&")+"offset="+std::to_string(next),type);});
         }
-        if(currentPath.find('?')!=std::string::npos){auto base=currentPath.substr(0,currentPath.find('?'));auto type=kind;button(body,"First page",[this,base,type]{browse(base,type);});}
+        if(currentPath.find('?')!=std::string::npos){auto base=pageBase(currentPath);auto type=kind;button(body,"First page",[this,base,type]{browse(base,type);});}
         focus();
     }
     void playing(){now=true;++generation;clear();track=label("Nothing playing",30);progress=label("0:00 / 0:00");

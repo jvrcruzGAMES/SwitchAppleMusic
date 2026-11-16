@@ -14,8 +14,10 @@ def normalize(resource):
             "isrc": a.get("isrc", "")}
 
 class Apple:
-    def __init__(self, settings, http):
+    def __init__(self, settings, http, user_token=None, storefront=None):
         self.s, self.http = settings, http
+        self.token = user_token
+        self.storefront = storefront or settings.storefront
         self._jwt, self._until = "", 0
 
     def developer_token(self):
@@ -27,19 +29,14 @@ class Apple:
         return self._jwt
 
     async def user_token(self):
-        if self.s.user_token_file is None:
-            raise HTTPException(503, "Configure a MusicKit-authorized Music User Token file")
-        try:
-            token = self.s.user_token_file.read_text().strip()
-            if not token:
-                raise OSError("empty token")
-            return token
-        except OSError:
-            raise HTTPException(503, "Run the MusicKit authorization helper and mount its token file") from None
+        if not self.token:
+            raise HTTPException(409, "Link your Apple Music library on the website first")
+        return self.token
 
     async def get(self, path, **params):
-        headers = {"Authorization": "Bearer " + self.developer_token(),
-                   "Music-User-Token": await self.user_token()}
+        headers = {"Authorization": "Bearer " + self.developer_token()}
+        if path.startswith("me/"):
+            headers["Music-User-Token"] = await self.user_token()
         try:
             r = await self.http.get("https://api.music.apple.com/v1/" + path,
                                     params=params, headers=headers)
@@ -65,8 +62,19 @@ class Apple:
         if kind == "library-songs":
             p = await self.get("me/library/songs/" + song_id + "/catalog")
         else:
-            p = await self.get("catalog/" + self.s.storefront + "/songs/" + song_id)
+            p = await self.get("catalog/" + self.storefront + "/songs/" + song_id)
         data = p.get("data", [])
         if not data:
             raise HTTPException(422, "This library upload has no playable catalog match")
         return data[0]
+
+    async def catalog_page(self, kind, resource_id, offset):
+        payload=await self.get("catalog/"+self.storefront+"/"+kind+"/"+resource_id+"/tracks",limit=100,offset=offset)
+        data=payload.get("data",[])
+        return {"items":[normalize(x) for x in data],"next_offset":offset+len(data) if payload.get("next") and data else None}
+
+    async def search(self,term,offset):
+        payload=await self.get("catalog/"+self.storefront+"/search",term=term,types="songs,albums,playlists",limit=25,offset=offset)
+        results=payload.get("results",{})
+        return {"items":[normalize(x) for kind in ("songs","albums","playlists") for x in results.get(kind,{}).get("data",[])],
+                "next_offset":offset+25 if any(results.get(kind,{}).get("next") for kind in results) else None}

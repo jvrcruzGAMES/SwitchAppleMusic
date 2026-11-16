@@ -4,11 +4,13 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Settings:
-    device_token: str
+    admin_password: str
     team_id: str
     key_id: str
     private_key: Path
-    user_token_file: Path | None = None
+    data_dir: Path = Path("/data")
+    public_url: str = "http://localhost:8000"
+    secure_cookies: bool = True
     wrapper_url: str = "http://wrapper:80"
     decrypt_host: str = "wrapper"
     decrypt_port: int = 10020
@@ -20,13 +22,12 @@ class Settings:
 
     @classmethod
     def from_env(cls):
-        token = os.environ.get("DEVICE_TOKEN", "")
-        if len(token) < 32:
-            raise ValueError("DEVICE_TOKEN must contain at least 32 characters")
-        return cls(device_token=token, team_id=os.environ["APPLE_TEAM_ID"],
+        return cls(admin_password=os.environ.get("ADMIN_PASSWORD", ""), team_id=os.environ["APPLE_TEAM_ID"],
                    key_id=os.environ["APPLE_KEY_ID"],
                    private_key=Path(os.environ.get("APPLE_PRIVATE_KEY", "/run/secrets/apple_key")),
-                   user_token_file=Path(os.environ.get("APPLE_MUSIC_USER_TOKEN_FILE", "/run/secrets/music_user_token")),
+                   data_dir=Path(os.environ.get("DATA_DIR", "/data")),
+                   public_url=os.environ.get("PUBLIC_URL", "http://localhost:8000").rstrip("/"),
+                   secure_cookies=os.environ.get("SECURE_COOKIES", "true").lower()=="true",
                    wrapper_url=os.environ.get("WRAPPER_URL", "http://wrapper:80"),
                    decrypt_host=os.environ.get("WRAPPER_DECRYPT_HOST", "wrapper"),
                    decrypt_port=int(os.environ.get("WRAPPER_DECRYPT_PORT", "10020")),

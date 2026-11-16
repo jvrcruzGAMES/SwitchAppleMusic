@@ -13,13 +13,15 @@ Config Config::load() {
     std::ifstream f("sdmc:/config/switchmusic/config.json");
     auto j = Json::parse(f, nullptr, false);
     if (!j.is_object() || !j.contains("backend_url") || !j["backend_url"].is_string()
-        || !j.contains("device_token") || !j["device_token"].is_string())
+        || !j.contains("username") || !j["username"].is_string()
+        || !j.contains("password") || !j["password"].is_string())
         throw std::runtime_error("Configure /config/switchmusic/config.json first");
-    Config c{j["backend_url"], j["device_token"], j.value("ca_bundle", std::string{})};
+    Config c{j["backend_url"], j["username"], j["password"], j.value("ca_bundle", std::string{})};
     while (!c.backend.empty() && c.backend.back() == '/') c.backend.pop_back();
-    if (c.token.size() < 32 || c.token.find_first_of("\r\n") != std::string::npos ||
+    if (c.username.size() < 3 || c.username.size() > 32 || c.username.find_first_of(":\r\n") != std::string::npos ||
+        c.password.size() < 12 || c.password.size() > 256 || c.password.find_first_of("\r\n") != std::string::npos ||
         (c.backend.rfind("https://",0) != 0 && c.backend.rfind("http://",0) != 0))
-        throw std::runtime_error("Invalid backend URL or device token");
+        throw std::runtime_error("Invalid backend URL or account credentials");
     return c;
 }
 std::string encode(const std::string& v) {
@@ -44,11 +46,11 @@ static void request(const Config& c,const std::string& path,void* out,curl_write
     if(path.empty()||path[0]!='/'||path.rfind("//",0)==0) throw std::runtime_error("Invalid API path");
     std::unique_ptr<CURL,decltype(&curl_easy_cleanup)> h(curl_easy_init(),curl_easy_cleanup);
     if(!h) throw std::runtime_error("HTTP allocation failed");
-    auto* headers=curl_slist_append(nullptr,("Authorization: Bearer "+c.token).c_str());
-    std::unique_ptr<curl_slist,decltype(&curl_slist_free_all)> owner(headers,curl_slist_free_all);
     auto url=c.backend+path;
     curl_easy_setopt(h.get(),CURLOPT_URL,url.c_str());
-    curl_easy_setopt(h.get(),CURLOPT_HTTPHEADER,headers);
+    curl_easy_setopt(h.get(),CURLOPT_HTTPAUTH,CURLAUTH_BASIC);
+    curl_easy_setopt(h.get(),CURLOPT_USERNAME,c.username.c_str());
+    curl_easy_setopt(h.get(),CURLOPT_PASSWORD,c.password.c_str());
     curl_easy_setopt(h.get(),CURLOPT_CONNECTTIMEOUT,5L);
     curl_easy_setopt(h.get(),CURLOPT_TIMEOUT,timeout);
     curl_easy_setopt(h.get(),CURLOPT_NOSIGNAL,1L);
@@ -98,7 +100,7 @@ Json control(const Config& c,Json req) {
     setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
     sockaddr_in addr{};addr.sin_family=AF_INET;addr.sin_port=htons(ControlPort);addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
     Json result;
-    req["version"]=1;req["token"]=c.token;
+    req["version"]=1;req["username"]=c.username;req["password"]=c.password;
     bool ok=connect(fd,reinterpret_cast<sockaddr*>(&addr),sizeof(addr))==0&&sendFrame(fd,req)&&receiveFrame(fd,result);
     close(fd);return ok?result:error("SwitchMusic sysmodule unavailable");
 }

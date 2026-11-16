@@ -134,7 +134,7 @@ jobs:
           - `config/switchmusic/config.example.json`
           - Project documentation, license notices and a file checksum manifest.
 
-          Configure your own backend URL/device token using the supplied example. Existing configuration files are not overwritten. Ultrahand/nx-ovlloader must already be installed.
+          Configure your own backend URL/account username and password using the supplied example. Existing configuration files are not overwritten. Ultrahand/nx-ovlloader must already be installed.
 
           Use Hekate Toolbox → Background services → SwitchMusic to enable or disable the module live, without rebooting. The toggle also controls automatic startup on future boots.
 

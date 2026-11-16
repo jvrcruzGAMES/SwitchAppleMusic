@@ -61,16 +61,16 @@ class Playback:
         # Imports stay lazy so browsing and tests work without the Rust extension.
         try:
             from gamdl.api import AppleMusicApi, WrapperApi
-            from gamdl.api.auth import AppleMusicCredentials
+            from gamdl.api.auth import credentials_from_wrapper
             from gamdl.transport import ApiHttpClient
             from gamdl.media import Song
             from gamdl.stream import Streamer
         except ImportError:
             raise HTTPException(503, "Install backend playback dependencies") from None
         resource = await self.apple.catalog_song("songs", song_id)
-        credentials = AppleMusicCredentials(self.apple.developer_token(), await self.apple.user_token())
         async with (await WrapperApi.create(base_url=self.s.wrapper_url,
                 decrypt_host=self.s.decrypt_host, decrypt_port=self.s.decrypt_port)) as wrapper:
+            credentials = credentials_from_wrapper(wrapper.me)
             async with AppleMusicApi(ApiHttpClient("apple_music"), credentials,
                                      self.s.storefront, "en-US") as api:
                 song = Song(song_id, api=api, metadata=resource)

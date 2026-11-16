@@ -60,31 +60,29 @@ A new tag points to the selected workflow source commit. If the tag already exis
 
 ## Host the backend
 
-This release is **single-account**: the wrapper session is the Apple Music account served to every device bearing your device token. Use one isolated deployment per account.
+1. Set up [wrapper-v2](https://github.com/glomatico/wrapper-v2) and authenticate its subscribed playback account, including 2FA. Keep its HTTP and decrypt ports private; the Switch never connects to them.
+2. Create a Media Services key enabled for MusicKit in your Apple Developer account. Save its `.p8` as `secrets/AuthKey.p8`. The private key stays on the server.
+3. Copy `.env.example` to `.env`. Set `ADMIN_PASSWORD` (12–256 characters), `PUBLIC_URL` to the website's exact external origin, the Apple team/key IDs, wrapper addresses and playback storefront. Set `BACKEND_UID`/`BACKEND_GID` to the host owner of the private key and data directory. Run `mkdir -p data` to create the persistent account directory before starting Compose.
+4. Run `docker compose up --build -d`. Put an HTTPS reverse proxy in front of localhost port 8000 and make the hostname reachable from the Switch. `SECURE_COOKIES=true` is the production default. For local HTTP testing only, set it to `false` and set `PUBLIC_URL` to the exact HTTP origin (including its port).
+5. Open the website and sign in as **admin** using `ADMIN_PASSWORD`. Only admin can create accounts; there is no public registration. The Accounts tab lets admin create accounts, reset their passwords, enable/disable or delete them, and remove their Apple library links. Users can change their own passwords. Password changes, resets and disabling revoke browser sessions.
+6. Each user signs into the website with their backend account and chooses **Link Apple Music**. Official MusicKit JS opens Apple's authorization flow; the backend validates the result with the official Apple Music API and stores the user's encrypted Music User Token. Linking is optional: accounts without a link can search and play public catalog tracks. A link enables that user's library, albums and playlists. No Apple password is collected by this application.
+7. Configure the Switch with that backend account's username/password. Device tokens and the old mounted Music User Token secret are no longer supported; replace existing SD configuration with the new example. Restart the sysmodule and reopen the NRO/overlay after changing credentials.
 
-1. Set up [wrapper-v2](https://github.com/glomatico/wrapper-v2) using its instructions and your own compatible Apple Music Android libraries. Authenticate its account and complete 2FA through its private HTTP API. Keep its HTTP and decrypt ports on a trusted host/network. The Switch does not connect to those ports.
-2. Create a Media Services key enabled for MusicKit in your Apple Developer account. Save its `.p8` as `secrets/AuthKey.p8`. The server signs its own ES256 developer tokens and sends library requests to `https://api.music.apple.com/v1/` with `Authorization` and `Music-User-Token` headers. Obtain your own Music User Token with the local MusicKit helper:
+`ADMIN_PASSWORD` bootstraps the admin only when the database is first created; changing the environment variable later does not reset its password. Change it through the website while signed in. Persist and back up **both** `data/accounts.sqlite3` and `data/apple-token.key` together. The key is needed to decrypt library links; protect the entire directory. Passwords are Argon2 hashes, and browser session tokens are stored as hashes. Apple revocation/expiry requires relinking on the website.
 
-   ```sh
-   python3 -m venv .venv
-   .venv/bin/pip install -e ./backend
-   .venv/bin/python scripts/authorize-musickit.py --team-id YOUR_TEAM_ID --key-id YOUR_KEY_ID
-   ```
+All playback uses the server's authenticated wrapper-v2 subscriber. Linking different Apple libraries does not create separate wrapper sessions or grant playback entitlements; catalog availability remains subject to that wrapper account and region. Catalog browsing and per-user library browsing use Apple's official API. Only canonical public catalog audio is shared in the bounded playback cache; private library tokens are never sent to the Switch. A short-lived developer JWT is necessarily delivered to the MusicKit browser, while the signing key remains server-side.
 
-   Open the printed localhost URL in your computer browser and authorize the same account used by wrapper-v2. The helper writes `secrets/music_user_token` with mode 0600 and exits. MusicKit receives a short-lived developer JWT in that browser; the private key stays on the host. No Apple password, private key, developer JWT or user token is returned to the Switch.
-3. Copy `.env.example` to `.env`, set the Apple team/key IDs, wrapper addresses, storefront, `BACKEND_UID`/`BACKEND_GID` matching the secret files' host owner, and a random device token of at least 32 characters. The host account's storefront and `APPLE_STOREFRONT` must match. Generate the device token with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
-4. Synchronized lyrics are fetched automatically through the `syncedlyrics` Python package using the song title and artist. No Musixmatch API key or lyric-provider configuration is required. Only timed lyrics are requested; tracks without synchronized lyrics show an unavailable message.
-5. Run `docker compose up --build -d`. Compose binds the backend to localhost by default; put an HTTPS reverse proxy in front of port 8000 and make its hostname reachable from your Switch. For a private LAN test you can set `BIND_ADDRESS` to the host's LAN address and use HTTP. Transport security is determined by that URL.
+Synchronized lyrics are gathered through the `syncedlyrics` Python package. No Musixmatch API key is required. Only timed lyrics are requested; unavailable lyrics are reported without invented timing.
 
-The Apple private key and Music User Token are mounted as Docker secrets. Compose runs under the configured non-root host UID/GID so mode-0600 secret files remain readable without making them public. wrapper-v2 runs separately; `host.docker.internal` resolves to the Linux Docker host in the supplied Compose configuration. Change the addresses if wrapper is on another host/network. The backend image installs a pinned Gamdl revision (including its Rust extension) for wrapper-v2 HLS/sample handling. Catalog and library browsing use Apple's official API; the playback adapter selects only wrapper-supplied HLS sources and rejects unhandled encrypted output.
+Compose runs under the configured non-root host UID/GID with a read-only root filesystem. Only the Apple private key is mounted as a secret; accounts and encrypted library links live in the persistent data volume. wrapper-v2 runs separately; `host.docker.internal` resolves to the Docker host on Linux. The image installs a pinned Gamdl revision for wrapper-v2 HLS/sample handling and never uses Widevine.
 
 For local development:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e './backend[playback,test]'
-# Export the variables in .env, APPLE_PRIVATE_KEY=/absolute/path/to/AuthKey.p8,
-# and APPLE_MUSIC_USER_TOKEN_FILE=/absolute/path/to/music_user_token
+# Export the values from .env and APPLE_PRIVATE_KEY=/absolute/path/to/AuthKey.p8.
+# Use a writable DATA_DIR, PUBLIC_URL=http://localhost:8000 and SECURE_COOKIES=false.
 .venv/bin/uvicorn switchmusic.app:app --host 127.0.0.1 --port 8000 --no-access-log
 .venv/bin/pytest backend/tests -q
 ```
@@ -94,7 +92,7 @@ python3 -m venv .venv
 Use an Atmosphere-capable Switch with a supported Ultrahand/nx-ovlloader setup. First verify the memory requirements for your console's sysmodule configuration.
 
 1. Extract the SD-card archive to the SD root. It contains the NRO at `switch/SwitchMusic/SwitchMusic.nro`, the overlay at `switch/.overlays/switchmusic.ovl`, and the sysmodule at `atmosphere/contents/420000000000534D/exefs.nsp`.
-2. Copy `config/switchmusic/config.example.json` to `config/switchmusic/config.json`. Set `backend_url` and the same `device_token` as the backend. For HTTPS, copy a current CA PEM bundle to `config/switchmusic/cacert.pem` (or update `ca_bundle`). TLS verification stays enabled. Never put the `.p8`, Apple account credentials on the SD card.
+2. Copy `config/switchmusic/config.example.json` to `config/switchmusic/config.json`. Set `backend_url`, `username` and `password` for an account created by admin. For HTTPS, copy a current CA PEM bundle to `config/switchmusic/cacert.pem` (or update `ca_bundle`). TLS verification stays enabled. Never put the `.p8`, Apple account credentials on the SD card.
 3. Open **Hekate Toolbox → Background services**, find **SwitchMusic**, and toggle it **On**. The packaged `atmosphere/contents/420000000000534D/toolbox.json` declares `requires_reboot: false`, so Toolbox can launch and terminate it without rebooting. Toolbox also updates `flags/boot2.flag` for the next boot; the archive initially omits this activation file. Configuration/startup failures are written to `config/switchmusic/fatal.log`. Without Toolbox, create `flags/boot2.flag` manually and reboot.
 4. Launch SwitchMusic through hbmenu in **application mode** (title takeover), browse a collection and select a song. The first song takes time to prepare: the backend materializes a temporary decrypted AAC/fMP4, then the sysmodule stages it on SD before mpv opens it. Two rotating SD files are limited to 64 MiB each. Playback stays in the sysmodule when the NRO closes.
 5. Open the SwitchMusic overlay from Ultrahand to control the background player.

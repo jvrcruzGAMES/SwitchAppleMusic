@@ -60,8 +60,8 @@ class Player {
     void advance() {
         if(index+1<queue.size()){++index;load();return;}
         for(unsigned skipped=0;!nextPath.empty()&&skipped<16;++skipped) {
-            auto page=api(config,nextPath);auto base=nextPath.substr(0,nextPath.find('?'));
-            nextPath=page.contains("next_offset")&&!page["next_offset"].is_null()?base+"?offset="+std::to_string(page["next_offset"].get<int>()):"";
+            auto page=api(config,nextPath);auto base=nextPath;auto offset=base.find("&offset=");if(offset==std::string::npos)offset=base.find("?offset=");if(offset!=std::string::npos)base.resize(offset);
+            nextPath=page.contains("next_offset")&&!page["next_offset"].is_null()?base+(base.find('?')==std::string::npos?"?":"&")+"offset="+std::to_string(page["next_offset"].get<int>()):"";
             Json next=Json::array();for(auto& item:page.at("items")){auto type=item.value("type",std::string{});if(type=="songs"||type=="library-songs")next.push_back({{"id",item.at("id")},{"type",type}});}
             if(!next.empty()) {if(queue.size()>28){auto remove=queue.size()-28;queue.erase(queue.begin(),queue.begin()+remove);index-=remove;}
                 index=queue.size();for(auto& item:next)queue.push_back(item);load();return;}
@@ -89,7 +89,7 @@ public:
         if(op=="play") {
             if(!j.contains("queue")||!j["queue"].is_array()||j["queue"].empty()||j["queue"].size()>128)return error("Queue must contain 1 to 128 songs");
             if(!j.contains("index")||!j["index"].is_number_unsigned()||j["index"].get<size_t>()>=j["queue"].size())return error("Invalid queue index");
-            if(j.contains("next_path")&&(!j["next_path"].is_string()||(!j["next_path"].get<std::string>().empty()&&j["next_path"].get<std::string>().rfind("/v1/library/",0)!=0)))return error("Invalid continuation path");
+            if(j.contains("next_path")&&(!j["next_path"].is_string()||(!j["next_path"].get<std::string>().empty()&&j["next_path"].get<std::string>().rfind("/v1/",0)!=0)))return error("Invalid continuation path");
             for(auto& t:j["queue"])if(!t.is_object()||!t.contains("id")||!t["id"].is_string()||!t.contains("type")||!t["type"].is_string())return error("Invalid queue item");
         } else if(op=="seek"||op=="volume") {
             auto field=op=="seek"?"seconds":"value";
@@ -145,7 +145,7 @@ int main() {
             timeval tv{0,300000};setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
             Json request;
             try {if(receiveFrame(fd,request)) {
-                if(request.value("version",0)!=1||request.value("token",std::string{})!=config.token)sendFrame(fd,error("Invalid control credentials/version"));
+                if(request.value("version",0)!=1||(request.value("username",std::string{})!=config.username||request.value("password",std::string{})!=config.password))sendFrame(fd,error("Invalid control credentials/version"));
                 else sendFrame(fd,player.request(request));
             }}catch(...){sendFrame(fd,error("Malformed request"));}close(fd);
         }

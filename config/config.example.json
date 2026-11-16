@@ -1,5 +1,6 @@
 {
   "backend_url": "https://music.example.com",
-  "device_token": "REPLACE_WITH_THE_SAME_32_PLUS_CHARACTER_DEVICE_TOKEN_AS_THE_SERVER",
+  "username": "your-account",
+  "password": "YOUR_ACCOUNT_PASSWORD",
   "ca_bundle": "sdmc:/config/switchmusic/cacert.pem"
 }

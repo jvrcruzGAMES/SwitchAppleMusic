@@ -34,7 +34,7 @@ Packaging validates the Toolbox display name, exact title ID and live-toggle fla
 
 ## Local control wire format
 
-Every connection carries one request and one response. Each frame is a **4-byte big-endian unsigned JSON byte length**, followed by UTF-8 JSON. Maximum payload: 65536 bytes. Malformed/oversized frames are rejected. Requests must include `version: 1` and `token`, matching the backend device token in the shared SD configuration.
+Every connection carries one request and one response. Each frame is a **4-byte big-endian unsigned JSON byte length**, followed by UTF-8 JSON. Maximum payload: 65536 bytes. Malformed/oversized frames are rejected. Requests must include `version: 1`, `username` and `password`, matching the backend account credentials in the shared SD configuration. The listener accepts only loopback connections.
 
 | `op` | Additional request fields | Response |
 | --- | --- | --- |
@@ -51,10 +51,17 @@ This is a local socket protocol, not a registered Horizon CMIF service. Loopback
 
 ## Backend API
 
-All `/v1/` routes require `Authorization: Bearer <DEVICE_TOKEN>`. `/health` is a public liveness probe. There is deliberately no generic Apple/wrapper proxy or account-login route.
+All `/v1/` routes require an active backend account: HTTP Basic authentication for native clients, or a signed-in browser cookie. The login shell, static assets and `/health` are public. Browser sessions expire after 12 hours and use HttpOnly, SameSite=Strict cookies (Secure by default). Cookie-authenticated mutations require a session CSRF token; supplied Origins must match `PUBLIC_URL`. There is no generic Apple/wrapper proxy or public registration.
 
 | Route | Result |
 | --- | --- |
+| `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` | Browser sign-in, user/CSRF state and sign-out |
+| `POST /auth/password` | Change own password and revoke sessions |
+| `POST /auth/apple/start`, `POST /auth/apple/callback`, `DELETE /auth/apple` | Session-bound MusicKit linking and unlinking |
+| `GET/POST /admin/accounts`, `PATCH/DELETE /admin/accounts/{id}` | Admin-only account management |
+| `DELETE /admin/accounts/{id}/apple` | Admin removes a library link |
+| `GET /v1/catalog/search?term=…&offset=0` | Public catalog songs, albums and playlists |
+| `GET /v1/catalog/{albums,playlists}/{id}/tracks?offset=0` | Public collection tracks |
 | `GET /health` | Liveness/version only; does not prove account readiness |
 | `GET /v1/library/{songs,albums,playlists}?offset=0` | `{items,next_offset}`; 100 resources per page |
 | `GET /v1/library/{albums,playlists}/{id}/tracks?offset=0` | Track page |
@@ -66,9 +73,11 @@ Resources are normalized to IDs, resource type, title, artist, album, duration, 
 
 ## Secrets and hosting
 
-The server stores the Media Services private key, creates one-hour developer tokens, and reads the operator's MusicKit-authorized Music User Token from a mounted secret. `scripts/authorize-musickit.py` serves a localhost-only browser authorization page using official MusicKit JS. It creates a 15-minute developer JWT for that browser and writes the resulting user token to a mode-0600 host file after a CSRF-protected callback. The server exits after authorization; rerun it when Apple revokes/expires the user token. Catalog/library calls use Apple's documented bearer and Music-User-Token headers. Wrapper authentication is administered directly on the host; the Switch never collects Apple passwords or 2FA codes. The MusicKit browser account and wrapper playback account must be the same subscriber. Automatic token renewal, device pairing and multiple account sessions are outside this version.
+The server retains the Media Services private key and signs one-hour developer JWTs. Each account links its own library using official MusicKit JS on the website. A ten-minute, single-use nonce binds the callback to the initiating user and browser session. The backend verifies the resulting token with Apple's `me/storefront` endpoint before storing it. Catalog requests use the developer JWT; only that user's `me/` requests receive their Music User Token. Tokens are Fernet-encrypted in SQLite using a separate mode-0600 key in `DATA_DIR`. Persist and back up both files together. Relink after Apple revokes or expires authorization.
 
-The Switch holds only your self-issued backend device token. Anyone with that token can access this deployment's library, audio, and lyrics, so use HTTPS outside a trusted private LAN and rotate it in both configurations if needed. No logs intentionally include authentication values. Uvicorn access logs are disabled in Docker. The Docker image defaults to UID 10001; Compose runs as the configured host UID/GID to read mode-0600 secret files. Both use a read-only root and a bounded tmpfs audio cache. Bring your own HTTPS reverse proxy. Do not expose wrapper's unauthenticated control/decrypt endpoints through that proxy.
+Only the reserved admin can create, manage and delete accounts. Its password is bootstrapped from `ADMIN_PASSWORD` on the first start; later starts preserve the database password. Passwords use Argon2; random browser session tokens and linking nonces are stored as SHA-256 hashes. Failed logins are throttled. Disabled/deleted accounts and revoked sessions are rejected on subsequent requests. Password reset/change revokes browser sessions. No Apple password or 2FA code is collected. Wrapper authentication is administered separately on the host: playback uses its subscribed account, independently of each user's library token. Catalog-only backend accounts need no Apple link.
+
+The Switch stores a backend username/password, not an Apple token or developer key. Use HTTPS and protect the SD configuration; changing those credentials requires updating it. Browser sign-in uses cookies and CSRF protection, while native requests use HTTP Basic over TLS. No logs intentionally include authentication values. Docker disables Uvicorn access logs, runs non-root with a read-only root and bounded tmpfs audio cache, and persists accounts under `/data`. Compose uses the configured host UID/GID to read the mode-0600 Apple key and data files. Bring your own HTTPS reverse proxy, configure its public origin exactly, and keep wrapper control/decrypt ports private.
 
 The sysmodule NPDM currently uses development-template filesystem/service permissions and broad syscall capabilities. It should be narrowed after hardware service tracing; it is not a minimal-permission production manifest.
 

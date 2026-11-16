@@ -6,7 +6,7 @@ using Json = nlohmann::json;
 constexpr unsigned ControlPort = 17837;
 constexpr size_t MaxFrame = 64 * 1024;
 struct Config {
-    std::string backend, token, ca;
+    std::string backend, username, password, ca;
     static Config load();
 };
 Json error(const std::string& message);

@@ -6,7 +6,7 @@ WORKDIR /app
 COPY . .
 RUN pip wheel --wheel-dir=/wheels '.[playback]'
 FROM python:3.12-slim
-RUN useradd --uid 10001 --create-home app
+RUN useradd --uid 10001 --create-home app && mkdir /data && chown app:app /data
 COPY --from=build /wheels /wheels
 RUN pip install --no-cache-dir --no-deps /wheels/* && rm -rf /wheels
 ENV HOME=/tmp

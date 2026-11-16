@@ -1,0 +1,6 @@
+[submodule "third_party/borealis"]
+	path = third_party/borealis
+	url = https://github.com/dragonflylee/borealis
+[submodule "third_party/libultrahand"]
+	path = third_party/libultrahand
+	url = https://github.com/ppkantorski/libultrahand

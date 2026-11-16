@@ -1,0 +1,24 @@
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    user: "${BACKEND_UID:-1000}:${BACKEND_GID:-1000}"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8000:8000"
+    env_file: .env
+    secrets:
+      - apple_key
+      - music_user_token
+    read_only: true
+    tmpfs:
+      - /tmp:size=600m,uid=${BACKEND_UID:-1000},gid=${BACKEND_GID:-1000},mode=0700
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+secrets:
+  apple_key:
+    file: ${APPLE_KEY_FILE:-./secrets/AuthKey.p8}
+  music_user_token:
+    file: ${APPLE_MUSIC_USER_TOKEN_FILE_HOST:-./secrets/music_user_token}

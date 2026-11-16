@@ -48,6 +48,14 @@ python3 scripts/package.py --build build-switch
 
 Outputs are in `build-switch/`; the SD-card archive is `dist/SwitchMusic-sdcard.zip`. Change the heap with `-DSWITCHMUSIC_HEAP_MB=32` after measuring your build. The sysmodule uses audio only (`vo=null`, `video=no`, `ao=hos`).
 
+## Create a GitHub release
+
+Open **Actions → Release SD card package → Run workflow**. Select the source branch, enter the desired **tag** (for example `v0.1.0`), optionally select **prerelease**, and run it.
+
+The workflow builds all three Switch components and publishes a release containing **`sdout.zip`** and **`sdout.zip.sha256`**. Extract the ZIP directly to the SD root; it includes the `switch`, `atmosphere/contents/420000000000534D/flags`, and `config/switchmusic` folders. Your existing configuration is preserved; configure the supplied example for your backend. Boot activation remains manual as described below.
+
+A new tag points to the selected workflow source commit. If the tag already exists, its exact commit is built instead. Existing releases are not overwritten. The workflow uses GitHub's built-in token and needs no additional repository secret. Creating/pushing a tag alone does not trigger this workflow.
+
 ## Host the backend
 
 This release is **single-account**: the wrapper session is the Apple Music account served to every device bearing your device token. Use one isolated deployment per account.

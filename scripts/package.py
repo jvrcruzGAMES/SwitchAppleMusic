@@ -58,6 +58,8 @@ def main():
     manifest = {name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(args.output, 'w', ZIP_DEFLATED) as archive:
+        # Keep the full install tree even while boot activation remains opt-in.
+        archive.writestr(f'atmosphere/contents/{TITLE:016X}/flags/', b'')
         for name,path in files.items():
             archive.write(path, name)
         archive.writestr('SwitchMusic-SHA256.json', json.dumps(manifest,indent=2)+'\n')

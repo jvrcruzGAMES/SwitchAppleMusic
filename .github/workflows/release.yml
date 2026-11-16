@@ -1,0 +1,157 @@
+name: Release SD card package
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create, or an existing tag to build (for example v0.1.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark this release as a prerelease'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.target.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve the exact source commit
+        id: target
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RELEASE_TAG" || "$RELEASE_TAG" == -* ]]; then
+            echo 'A nonempty Git tag that does not start with a dash is required.' >&2
+            exit 1
+          fi
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+          else
+            commit=$(git rev-parse HEAD)
+          fi
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
+          printf 'Building commit %s for tag %s.\n' "$commit" "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build and package Switch applications
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          submodules: recursive
+          persist-credentials: false
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          dkp-pacman -Syu --noconfirm
+          dkp-pacman -S --needed --noconfirm \
+            switch-dev switch-cmake switch-curl switch-zlib switch-minizip \
+            switch-mbedtls switch-glm switch-libmpv switch-libplacebo switch-libjpeg-turbo
+      - name: Build NRO, overlay and sysmodule
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-release --parallel 2
+      - name: Assemble SD root archive and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/package.py --build build-release --output dist/sdout.zip
+          (cd dist && sha256sum sdout.zip > sdout.zip.sha256)
+          python3 -m zipfile --test dist/sdout.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdout
+          path: |
+            dist/sdout.zip
+            dist/sdout.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Create GitHub release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdout
+          path: dist
+      - name: Publish release with sdout.zip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          BUILD_COMMIT: ${{ needs.prepare.outputs.commit }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # An existing tag must still refer to the commit we actually built.
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            tagged_commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+            if [[ "$tagged_commit" != "$BUILD_COMMIT" ]]; then
+              echo 'The release tag moved during the build; refusing to publish mismatched binaries.' >&2
+              exit 1
+            fi
+          fi
+          (cd dist && sha256sum --check sdout.zip.sha256)
+          notes="$RUNNER_TEMP/switchmusic-release-notes.md"
+          cat > "$notes" <<'NOTES'
+          Extract **sdout.zip** directly to the root of your SD card.
+
+          Included:
+          - `switch/SwitchMusic/SwitchMusic.nro`
+          - `switch/.overlays/switchmusic.ovl`
+          - `atmosphere/contents/420000000000534D/exefs.nsp`
+          - `atmosphere/contents/420000000000534D/flags/`
+          - `config/switchmusic/config.example.json`
+          - Project documentation, license notices and a file checksum manifest.
+
+          Configure your own backend URL/device token using the supplied example. Existing configuration files are not overwritten. Ultrahand/nx-ovlloader must already be installed.
+
+          The experimental sysmodule is included without `boot2.flag`. The current mpv player has not yet been replaced by the low-memory FFmpeg player; check the included validation notes and available sysmodule memory before enabling it.
+          NOTES
+          printf '\nBuilt from commit %s.\n' "$BUILD_COMMIT" >> "$notes"
+          options=()
+          if [[ "$PRERELEASE" == true ]]; then
+            options+=(--prerelease)
+          fi
+          # gh creates a missing tag at BUILD_COMMIT; an existing release is never overwritten.
+          gh release create "$RELEASE_TAG" \
+            dist/sdout.zip dist/sdout.zip.sha256 \
+            --target "$BUILD_COMMIT" --title "$RELEASE_TAG" \
+            --notes-file "$notes" --generate-notes "${options[@]}"
+          printf 'Published release %s with sdout.zip and its SHA-256 checksum.\n' "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

@@ -52,7 +52,7 @@ def client(settings):
 def test_health_no_credentials(client):
     assert client.get('/health').json()['status'] == 'ok'
 
-@pytest.mark.parametrize('path', ['/v1/library/songs', '/v1/resolve/songs/123', '/v1/lyrics/123', '/v1/stream/123'])
+@pytest.mark.parametrize('path', ['/v1/library/songs', '/v1/resolve/songs/123', '/v1/lyrics/123'])
 def test_protected(client, path):
     assert client.get(path).status_code == 401
 
@@ -163,6 +163,6 @@ def test_anonymous_catalog_browsing_never_uses_personal_token(settings):
             response=client.get(f'/v1/catalog/{kind}/123/tracks?offset=100')
             assert response.status_code==200
             assert response.json()['next_offset']==101
-        for path in ('/v1/library/songs','/v1/library/albums/123/tracks','/auth/me','/v1/resolve/songs/123','/v1/playback/123.m3u8','/v1/stream/123'):
+        for path in ('/v1/library/songs','/v1/library/albums/123/tracks','/auth/me','/v1/resolve/songs/123'):
             assert client.get(path).status_code==401
         assert len(calls)==3

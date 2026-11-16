@@ -3,6 +3,7 @@ import asyncio
 import time
 from pathlib import Path
 from fastapi import HTTPException
+from .hls import playlist
 from .codecs import select_source, wrapper_source, decryption_allowed
 
 class Playback:
@@ -24,6 +25,7 @@ class Playback:
                 continue
             if now - self.touched.get(p,p.stat().st_mtime) > self.s.cache_ttl or total + reserve > self.s.max_cache_bytes:
                 p.unlink(missing_ok=True)
+                p.with_suffix(".m3u8").unlink(missing_ok=True)
                 self.touched.pop(p,None)
                 total -= size
         if total + reserve > self.s.max_cache_bytes:
@@ -44,6 +46,8 @@ class Playback:
                     self.active[target] = self.active.get(target, 0) + 1
                 return target
             self.prune(self.s.max_track_bytes)
+            # A regenerated rendition may have different byte offsets.
+            target.with_suffix(".m3u8").unlink(missing_ok=True)
             temp = target.with_suffix(".part")
             try:
                 async with asyncio.timeout(180):
@@ -61,6 +65,22 @@ class Playback:
                 raise HTTPException(502, "Wrapper stream preparation failed") from None
             finally:
                 temp.unlink(missing_ok=True)
+
+    async def manifest(self, song_id):
+        path=await self.materialize(song_id,acquire=True)
+        try:
+            cached=path.with_suffix('.m3u8')
+            if cached.exists():return cached.read_text()
+            song=await self.apple.catalog_song('songs',song_id)
+            text=await asyncio.to_thread(playlist,path,song_id,song.get('attributes',{}).get('durationInMillis',0)/1000)
+            # Small synchronous write publishes only a complete playlist; no await
+            # allows another request to interleave this rename.
+            temporary=cached.with_suffix('.m3u8.part')
+            try:
+                temporary.write_text(text);temporary.replace(cached)
+            finally:temporary.unlink(missing_ok=True)
+            return text
+        finally:self.release(path)
 
     async def render(self, song_id: str, target: Path):
         # Imports stay lazy so browsing and tests work without the Rust extension.

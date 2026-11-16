@@ -57,7 +57,7 @@ This is a local socket protocol, not a registered Horizon CMIF service. Loopback
 
 ## Backend API
 
-All `/v1/` routes require an active backend account: a signed-in session cookie for native clients and browsers (HTTP Basic remains available for external API scripts). The login shell, static assets and `/health` are public. Browser sessions expire after 12 hours and use HttpOnly, SameSite=Strict cookies (Secure by default). Cookie-authenticated mutations require a session CSRF token; supplied Origins must match `PUBLIC_URL`. There is no generic Apple/wrapper proxy or public registration.
+Personal library, resolution and lyrics routes require an active backend account: a signed-in session cookie for native clients and browsers (HTTP Basic remains available for external API scripts). The login shell, static assets and `/health` are public. Browser sessions expire after 12 hours and use HttpOnly, SameSite=Strict cookies (Secure by default). Cookie-authenticated mutations require a session CSRF token; supplied Origins must match `PUBLIC_URL`. There is no generic Apple/wrapper proxy or public registration.
 
 | Route | Result |
 | --- | --- |
@@ -73,7 +73,7 @@ All `/v1/` routes require an active backend account: a signed-in session cookie 
 | `GET /v1/library/{songs,albums,playlists}?offset=0` | `{items,next_offset}`; 100 resources per page |
 | `GET /v1/library/{albums,playlists}/{id}/tracks?offset=0` | Track page |
 | `GET /v1/resolve/{songs,library-songs}/{id}` | Normalized catalog song and backend-relative `stream_path` |
-| `GET /v1/playback/{numeric_catalog_id}.m3u8` | Authenticated single-file VOD manifest |
+| `GET /v1/playback/{numeric_catalog_id}.m3u8` | Static public single-file VOD manifest |
 | `GET /v1/stream/{numeric_catalog_id}` | Decrypted fMP4; supports HTTP Range |
 | `GET /v1/lyrics/{catalog_id}` | `{provider,copyright,tracking_url,lines:[{time_ms,text}]}` |
 
@@ -106,4 +106,6 @@ The sysmodule NPDM currently uses development-template filesystem/service permis
 - [syncedlyrics package](https://github.com/moehmeni/syncedlyrics).
 - [libultrahand](https://github.com/ppkantorski/libultrahand) and [Borealis](https://github.com/dragonflylee/borealis).
 
-Catalog search and catalog album/playlist track lists allow anonymous GET requests using only the server developer JWT and configured storefront. They never receive a Music User Token. Explicit invalid or expired credentials still return 401; the NRO can clear them and continue as a guest. Library, account, QR linking and playback endpoints remain authenticated. Guest native configuration persists only the server URL and optional username, with an empty session; session-required sysmodule/overlay configuration validation remains strict.
+Catalog search and catalog album/playlist track lists allow anonymous GET requests using only the server developer JWT and configured storefront. They never receive a Music User Token. Explicit invalid or expired credentials still return 401; the NRO can clear them and continue as a guest. Library, account, QR linking, song resolution and lyrics endpoints remain authenticated. Static M3U8 and media URLs are public and do not depend on a session. Guest native configuration persists only the server URL and optional username, with an empty session; session-required sysmodule/overlay configuration validation remains strict.
+
+Playback URLs are permanent track-ID paths: `/v1/playback/123.m3u8` and `/v1/stream/123`. Neither route requires authentication or signed query parameters; expired cookies are ignored. Each request checks the bounded audio cache and prepares missing tracks through wrapper-v2 on demand. A cached `.m3u8` sidecar allows warm manifest requests without an Apple metadata lookup, including after a process restart with the cache intact. Eviction removes both audio and playlist, and regeneration rebuilds byte ranges for the new rendition. Active responses retain cache leases. URL stability does not guarantee Apple/wrapper availability or retention of identical media bytes after eviction. Native login and loopback playback controls retain their existing account requirements.

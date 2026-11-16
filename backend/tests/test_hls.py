@@ -12,20 +12,19 @@ from test_backend import settings,client,HEADERS,SONG
 
 def box(kind,payload=b''):return struct.pack('>I4s',len(payload)+8,kind)+payload
 
-def test_manifest_contains_authenticated_backend_relative_ranges(client,monkeypatch):
+def test_manifest_contains_static_public_backend_relative_ranges(client,monkeypatch):
     async def song(*args):return {**SONG,'attributes':{**SONG['attributes'],'durationInMillis':3500}}
     monkeypatch.setattr("switchmusic.apple.Apple.catalog_song",song)
     async def render(song_id,target):target.write_bytes(box(b'ftyp')+box(b'moov')+box(b'moof')+box(b'mdat',b'audio'))
     client.app.state.playback.render=render
-    assert client.get('/v1/playback/123.m3u8').status_code==401
-    response=client.get('/v1/playback/123.m3u8',headers=HEADERS)
+    response=client.get('/v1/playback/123.m3u8')
     assert response.status_code==200,response.text
     assert '#EXT-X-TARGETDURATION:4\n' in response.text
     assert 'BYTERANGE="16@0"' in response.text
     assert '#EXT-X-BYTERANGE:21@16' in response.text
     assert '/v1/stream/123' in response.text and 'http' not in response.text
     assert client.app.state.playback.active=={}
-    assert client.get('/v1/stream/123',headers={**HEADERS,'Range':'bytes=16-36'}).content==box(b'moof')+box(b'mdat',b'audio')
+    assert client.get('/v1/stream/123',headers={'Range':'bytes=16-36'}).content==box(b'moof')+box(b'mdat',b'audio')
 
 def test_manifest_rejects_unfragmented_or_invalid_audio(tmp_path):
     media=tmp_path/'audio.m4a'
@@ -76,3 +75,34 @@ async def test_cancelled_remux_kills_child_and_cleans_temp(settings,monkeypatch)
     with pytest.raises(TimeoutError):
         async with asyncio.timeout(.01):await cache.fragment(media)
     assert child.killed and not media.with_suffix('.fragmented').exists()
+
+
+def test_static_urls_reuse_cache_and_repopulate_after_eviction_and_restart(client,monkeypatch):
+    renders=[];lookups=[]
+    async def song(*args):
+        lookups.append(args)
+        return {**SONG,'attributes':{**SONG['attributes'],'durationInMillis':3500}}
+    monkeypatch.setattr('switchmusic.apple.Apple.catalog_song',song)
+    raw=box(b'ftyp')+box(b'moov')+box(b'moof')+box(b'mdat',b'audio')
+    async def render(song_id,target):renders.append(song_id);target.write_bytes(raw)
+    cache=client.app.state.playback;cache.render=render
+    url='/v1/playback/123.m3u8'
+    first=client.get(url);assert first.status_code==200
+    # Expired credentials do not make these public URLs expire.
+    assert client.get(url,headers={'Cookie':'switchmusic_session=expired'}).text==first.text
+    assert renders==['123'] and len(lookups)==1
+    # Recreate the cache object to exercise existing files after a server restart.
+    cache=Playback(cache.s,cache.apple);cache.render=render;client.app.state.playback=cache
+    assert client.get(url).text==first.text
+    assert renders==['123'] and len(lookups)==1
+    assert client.get('/v1/stream/123',headers={'Range':'bytes=16-36'}).content==raw[16:37]
+    cache.prune(cache.s.max_cache_bytes)
+    assert not (cache.s.cache_dir/'123.m4a').exists()
+    assert not (cache.s.cache_dir/'123.m3u8').exists()
+    assert client.get(url).text==first.text
+    assert renders==['123','123'] and len(lookups)==2
+    # Direct media requests also prepare missing tracks, without fetching a playlist.
+    cache.prune(cache.s.max_cache_bytes)
+    response=client.get('/v1/stream/123',headers={'Range':'bytes=16-36'})
+    assert response.status_code==206 and response.content==raw[16:37]
+    assert renders==['123','123','123'] and cache.active=={}

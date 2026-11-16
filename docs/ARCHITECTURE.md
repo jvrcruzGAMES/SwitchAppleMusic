@@ -105,3 +105,5 @@ The sysmodule NPDM currently uses development-template filesystem/service permis
 - [Gamdl streaming implementation](https://github.com/glomatico/gamdl).
 - [syncedlyrics package](https://github.com/moehmeni/syncedlyrics).
 - [libultrahand](https://github.com/ppkantorski/libultrahand) and [Borealis](https://github.com/dragonflylee/borealis).
+
+Catalog search and catalog album/playlist track lists allow anonymous GET requests using only the server developer JWT and configured storefront. They never receive a Music User Token. Explicit invalid or expired credentials still return 401; the NRO can clear them and continue as a guest. Library, account, QR linking and playback endpoints remain authenticated. Guest native configuration persists only the server URL and optional username, with an empty session; session-required sysmodule/overlay configuration validation remains strict.

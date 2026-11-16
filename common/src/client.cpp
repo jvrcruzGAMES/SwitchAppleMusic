@@ -22,8 +22,8 @@ void Config::validate(bool requireSession) {
     auto scheme=part(CURLUPART_SCHEME),path=part(CURLUPART_PATH);
     if((scheme!="https"&&scheme!="http")||part(CURLUPART_HOST).empty()||!part(CURLUPART_USER).empty()||!part(CURLUPART_PASSWORD).empty()||!part(CURLUPART_QUERY).empty()||!part(CURLUPART_FRAGMENT).empty()||(path!=""&&path!="/"))
         throw std::runtime_error("Use the server's http:// or https:// address, without a path or credentials");
-    if(username.size()<3||username.size()>32||username[0]<'a'||username[0]>'z'||
-       !std::all_of(username.begin(),username.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='.'||c=='_'||c=='-';}))
+    if((requireSession||!session.empty()||!username.empty()) && (username.size()<3||username.size()>32||username[0]<'a'||username[0]>'z'||
+       !std::all_of(username.begin(),username.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='.'||c=='_'||c=='-';})))
         throw std::runtime_error("Enter your backend account username");
     if((requireSession||!session.empty()) && (session.size()<32||session.size()>128||!std::all_of(session.begin(),session.end(),[](unsigned char c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-'||c=='_';})))
         throw std::runtime_error("Open SwitchMusic to sign in");
@@ -108,6 +108,7 @@ static std::string request(const Config& c,const std::string& path,void* out,cur
 }
 Json signIn(Config c,const std::string& password) {
     c.session.clear();c.validate(false);
+    if(c.username.empty())throw std::runtime_error("Enter your backend account username");
     Json body={{"username",c.username},{"password",password}};std::string raw;
     auto session=request(c,"/auth/login",&raw,collect,35,&body);
     c.session=session;c.validate();auto result=Json::parse(raw);result["session"]=session;return result;

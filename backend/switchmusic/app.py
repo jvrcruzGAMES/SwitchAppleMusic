@@ -111,6 +111,12 @@ def create_app(settings=None,transport=None):
                 raise HTTPException(403,'Invalid CSRF token')
         return principal
 
+    async def catalog_access(request: Request):
+        # Anonymous catalog browsing needs only the server developer JWT.
+        # Still reject invalid credentials when a caller explicitly supplies them.
+        if request.headers.get('authorization') or request.cookies.get(COOKIE):
+            await current(request)
+
     async def admin(principal: Principal=Depends(current)):
         if not principal.user['admin']:raise HTTPException(403,'Admin access required')
         return principal
@@ -245,13 +251,13 @@ def create_app(settings=None,transport=None):
         return await apple(principal).page(kind,offset,valid_id(resource_id))
 
     @app.get('/v1/catalog/search')
-    async def search(term: str=Query(min_length=1,max_length=200),offset: int=Query(0,ge=0,le=1000000),principal: Principal=Depends(current)):
-        return await apple(principal).search(term,offset)
+    async def search(term: str=Query(min_length=1,max_length=200),offset: int=Query(0,ge=0,le=1000000),access=Depends(catalog_access)):
+        return await app.state.apple.search(term,offset)
 
     @app.get('/v1/catalog/{kind}/{resource_id}/tracks')
-    async def catalog_tracks(kind: str,resource_id: str,offset: int=Query(0,ge=0,le=1000000),principal: Principal=Depends(current)):
+    async def catalog_tracks(kind: str,resource_id: str,offset: int=Query(0,ge=0,le=1000000),access=Depends(catalog_access)):
         if kind not in ('albums','playlists'):raise HTTPException(404,'Unknown track collection')
-        return await apple(principal).catalog_page(kind,valid_id(resource_id),offset)
+        return await app.state.apple.catalog_page(kind,valid_id(resource_id),offset)
 
     @app.get('/v1/resolve/{kind}/{resource_id}')
     async def resolve(kind: str,resource_id: str,principal: Principal=Depends(current)):

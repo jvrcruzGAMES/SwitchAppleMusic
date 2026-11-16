@@ -30,6 +30,9 @@ class SessionServer(http.server.BaseHTTPRequestHandler):
             self.server.session=None;return self.reply(204,None)
         self.reply(403,{'detail':'Denied'})
     def do_GET(self):
+        if self.path=='/v1/catalog/search?term=test':
+            assert not self.headers.get('Cookie') and not self.headers.get('Authorization')
+            return self.reply(200,{'items':[{'id':'123'}]})
         if not self.authorized():return self.reply(401,{'detail':'Sign in required'})
         if self.path=='/test/expire':self.server.session=None
         self.reply(200,{'user':{'username':'admin'},'csrf':'csrf-value'})

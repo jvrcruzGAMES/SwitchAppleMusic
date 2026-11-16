@@ -145,3 +145,24 @@ def test_missing_musickit_authorization(client):
     r=client.get('/v1/library/songs',headers=HEADERS)
     assert r.status_code==409
     assert 'website' in r.text
+
+
+def test_anonymous_catalog_browsing_never_uses_personal_token(settings):
+    calls=[]
+    def upstream(request):
+        calls.append(request)
+        assert 'Music-User-Token' not in request.headers
+        assert request.headers['Authorization'].startswith('Bearer ')
+        assert request.url.path.startswith('/v1/catalog/us/')
+        if request.url.path.endswith('/search'):
+            return httpx.Response(200,json={'results':{'songs':{'data':[SONG]}}})
+        return httpx.Response(200,json={'data':[SONG],'next':'next'})
+    with TestClient(create_app(settings,httpx.MockTransport(upstream))) as client:
+        assert client.get('/v1/catalog/search?term=test').json()['items'][0]['id']=='123'
+        for kind in ('albums','playlists'):
+            response=client.get(f'/v1/catalog/{kind}/123/tracks?offset=100')
+            assert response.status_code==200
+            assert response.json()['next_offset']==101
+        for path in ('/v1/library/songs','/v1/library/albums/123/tracks','/auth/me','/v1/resolve/songs/123','/v1/playback/123.m3u8','/v1/stream/123'):
+            assert client.get(path).status_code==401
+        assert len(calls)==3

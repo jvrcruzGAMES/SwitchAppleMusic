@@ -114,3 +114,5 @@ The original project code is MIT licensed. Dependencies retain their own license
 Architecture, control protocol, API and trust boundaries: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 If Apple accepts the developer JWT but MusicKit reports `Unauthorized` immediately after **Allow**, check the website’s response headers: use `Referrer-Policy: strict-origin`. A reverse proxy or browser privacy setting that replaces it with `same-origin` or `no-referrer` can prevent Apple’s popup from returning the Music User Token. The backend sends `strict-origin`, which shares only the origin, never a QR capability, path or query string.
+
+The NRO supports guest catalog browsing: enter the server URL and choose **Browse without signing in**. Search songs, albums and playlists and open their track lists without a backend account or Apple Music link. The saved server opens in guest mode on subsequent launches. Personal-library buttons appear only after backend login and Apple Music linking. Playback still requires a backend account; an Apple library link remains optional for catalog playback.

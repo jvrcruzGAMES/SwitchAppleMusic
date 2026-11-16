@@ -15,6 +15,11 @@ extern "C" int __wrap_rename(const char* source,const char* destination){
 int main(int argc,char** argv){
     assert(argc==3);curl_global_init(CURL_GLOBAL_DEFAULT);
     const std::string path=argv[2],password="Synthetic-password-12345";
+    Config guest{argv[1],"",""};guest.validate(false);guest.save(path);
+    auto anonymous=Config::load(false,path);assert(anonymous.username.empty()&&anonymous.session.empty());
+    assert(api(anonymous,"/v1/catalog/search?term=test").at("items")[0].at("id")=="123");
+    bool guestDenied=false;try{anonymous.validate();}catch(...){guestDenied=true;}assert(guestDenied);
+    guestDenied=false;try{signIn(anonymous,password);}catch(...){guestDenied=true;}assert(guestDenied);
     Config config{argv[1],"admin",""};
     for(auto url:{"file:///tmp/test","https://user:password@example.com","https://example.com/path","https://example.com?token=secret","https://example.com#fragment"}){
         auto invalid=config;invalid.backend=url;bool rejected=false;try{invalid.validate(false);}catch(...){rejected=true;}assert(rejected);

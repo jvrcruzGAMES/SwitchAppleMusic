@@ -153,6 +153,8 @@ def test_expired_native_session_requires_login(website):
     with website.app.state.accounts.db() as db:db.execute('UPDATE sessions SET expires=0')
     assert website.get('/auth/me').status_code==401
     assert website.get('/v1/catalog/search?term=test').status_code==401
+    website.cookies.clear()
+    assert website.get('/v1/catalog/search?term=test').status_code==200
 
 
 def test_expired_apple_link_does_not_expire_backend_login(website):

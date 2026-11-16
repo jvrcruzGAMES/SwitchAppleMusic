@@ -66,6 +66,7 @@ class Library {
     brls::Label *notice,*track=nullptr,*progress=nullptr,*lyric=nullptr,*nearby=nullptr,*credit=nullptr;
     Json currentUser;bool inSettings=false,qrActive=false,qrPending=false;std::string qrCode;Clock::time_point qrUntil{},lastQR{};brls::Label* qrTimer=nullptr;
     Json state,items=Json::array(),lines=Json::array();std::string currentPath,kind,lyricId,continuation;
+    std::vector<brls::Button*> personalButtons;
     brls::Button* navigationFocus=nullptr;std::function<void()> navigation;
     unsigned generation=0,authGeneration=0;bool now=false,polling=false;Clock::time_point lastPoll{};
     brls::Button* button(brls::Box* box,const std::string& text,std::function<void()> fn) {
@@ -82,8 +83,8 @@ public:
         auto* account=new brls::Box(brls::Axis::ROW);account->setHeight(60);
         navigationFocus=button(account,"Account",[this]{if(loggedIn)settings();else loginScreen();});root->addView(account);
         auto* menu=new brls::Box(brls::Axis::ROW);menu->setHeight(70);libraryMenu=menu;
-        for(auto k:{"songs","albums","playlists"}){auto* b=button(menu,k,[this,k]{browse("/v1/library/"+std::string(k),k);});if(!navigationFocus)navigationFocus=b;}
-        button(menu,"Search",[this]{if(!loggedIn)return;brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});
+        for(auto k:{"songs","albums","playlists"}){auto* b=button(menu,k,[this,k]{browse("/v1/library/"+std::string(k),k);});personalButtons.push_back(b);}
+        button(menu,"Search",[this]{brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});
         button(menu,"Now playing",[this]{playing();});root->addView(menu);
         notice=new brls::Label();notice->setText("Connecting to your music server");notice->setFontSize(18);root->addView(notice);
         scroll=new brls::ScrollingFrame();scroll->setGrow(1);body=new brls::Box(brls::Axis::COLUMN);body->setPadding(16);scroll->setContentView(body);root->addView(scroll);
@@ -91,7 +92,7 @@ public:
         try{config=Config::load(false);}catch(...){}
         net.configure(config);
         if(!config.session.empty()){checking=true;authGeneration=++generation;authPending=net.submit({"auth","/auth/me",{},generation});clear();label("Checking your saved login…");focus();}
-        else loginScreen();
+        else if(!config.backend.empty())guest();else loginScreen();
     }
     void keyboard(const std::string& title,std::string& value,int limit,bool secret=false){
         SwkbdConfig keyboard{};auto rc=swkbdCreate(&keyboard,0);
@@ -113,7 +114,20 @@ public:
         button(body,"Username: "+(config.username.empty()?std::string("Enter username"):config.username),[this]{keyboard("Username",config.username,32);});
         button(body,password.empty()?"Password: Enter password":"Password: ••••••••",[this]{keyboard("Account password",password,256,true);});
         button(body,"Sign in",[this]{login();});
+        button(body,"Browse without signing in",[this]{guest();});
         label("After signing in, link Apple Music in Settings with a QR code or on the server website. Catalog playback does not require a library link.",18);focus();
+    }
+    void guest(){
+        try{config.validate(false);}catch(const std::exception& e){notice->setText(e.what());return;}
+        endQR();config.session.clear();password.clear();loggedIn=false;checking=false;authPending=false;
+        inSettings=false;now=false;polling=false;++generation;currentUser=Json::object();
+        net.configure(config);try{config.save();}catch(const std::exception& e){notice->setText(e.what());return;}
+        navigationFocus->setText("Account");libraryMenu->setVisibility(brls::Visibility::VISIBLE);
+        for(auto* b:personalButtons)b->setVisibility(brls::Visibility::GONE);clear();
+        notice->setText("Browsing the public Apple Music catalog");label("Apple Music catalog",32);
+        label("Search songs, albums and playlists without signing in. Sign in to play music or access your personal library.",20);
+        button(body,"Search catalog",[this]{brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});
+        button(body,"Sign in",[this]{loginScreen();});focus();
     }
     void login(){
         if(authPending)return;
@@ -134,6 +148,7 @@ public:
         authPending=false;checking=false;
         if(fresh){config.session=result.at("session");try{config.save();}catch(const std::exception& e){config.session.clear();loginScreen(e.what());return;}net.configure(config);}
         loggedIn=true;currentUser=result.at("user");navigationFocus->setText("Settings");lastAuth=Clock::now();libraryMenu->setVisibility(brls::Visibility::VISIBLE);
+        for(auto* b:personalButtons)b->setVisibility(currentUser.value("apple_linked",false)?brls::Visibility::VISIBLE:brls::Visibility::GONE);
         notice->setText("Signed in as "+config.username);
         if(result.at("user").value("apple_linked",false))browse("/v1/library/songs","songs");
         else{clear();label("Search the Apple Music catalog",30);label("Your Apple Music library is not linked. Open Settings to link it with a QR code, or use the server website.",20);button(body,"Settings",[this]{settings();});button(body,"Search catalog",[this]{brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});focus();}
@@ -147,7 +162,7 @@ public:
         if(!net.submit({"settings","/auth/me",{},generation})){showSettings(currentUser,"Network queue busy; try again");}
     }
     void showSettings(const Json& user,const std::string& message=""){
-        currentUser=user;clear();notice->setText(message.empty()?"Manage your Apple Music library connection":message);
+        currentUser=user;for(auto* b:personalButtons)b->setVisibility(user.value("apple_linked",false)?brls::Visibility::VISIBLE:brls::Visibility::GONE);clear();notice->setText(message.empty()?"Manage your Apple Music library connection":message);
         label("Settings",32);label("Server: "+config.backend,18);label("Backend account: "+config.username,18);
         bool linked=user.value("apple_linked",false);label(linked?"Apple Music library connected":"Apple Music library not linked",24);
         button(body,linked?"Relink Apple Music with QR code":"Link Apple Music with QR code",[this]{startQR();});
@@ -175,13 +190,16 @@ public:
         button(body,"Cancel",[this]{settings();});focus();
     }
     void browse(std::string path,std::string type) {
-        if(!loggedIn)return;
-        endQR();inSettings=false;now=false;++generation;currentPath=path;kind=type;clear();label("Loading your library…");focus();
+        if(path.rfind("/v1/library/",0)==0){
+            if(!loggedIn){loginScreen("Sign in to access your personal library. Public catalog browsing is available without login.");return;}
+            if(!currentUser.value("apple_linked",false)){settings();return;}
+        }
+        endQR();inSettings=false;now=false;++generation;currentPath=path;kind=type;clear();label("Loading music…");focus();
         if(!net.submit({"page",path,{},generation})){clear();label("Network queue busy");button(body,"Retry",[this]{browse(currentPath,kind);});focus();}
     }
     void showPage(const Json& page) {
         clear();items=page.value("items",Json::array());
-        if(kind=="tracks")button(body,"Back to collections",[this]{browse("/v1/library/albums","albums");});
+        if(kind=="tracks"&&currentPath.rfind("/v1/library/",0)==0)button(body,"Back to collections",[this]{browse("/v1/library/albums","albums");});
         if(items.empty())label("No items in this collection.");
         continuation.clear();
         if(page.contains("next_offset")&&!page["next_offset"].is_null())continuation=withOffset(currentPath,page["next_offset"].get<int>());
@@ -190,6 +208,7 @@ public:
             button(body,title+(artist.empty()?"":"  ·  "+artist),[this,item,i,snapshot,nextPath]{
                 auto type=item.value("type",std::string{});
                 if(type=="songs"||type=="library-songs") {
+                    if(!loggedIn){loginScreen("Sign in to play music. You can browse the catalog without signing in.");return;}
                     Json queue=Json::array();size_t selected=0;
                     for(size_t x=0;x<snapshot.size();++x){auto t=snapshot[x].value("type",std::string{});if(t=="songs"||t=="library-songs"){if(x==i)selected=queue.size();queue.push_back({{"id",snapshot[x]["id"]},{"type",t}});}}
                     command({{"op","play"},{"queue",queue},{"index",selected},{"next_path",nextPath}});playing();
@@ -207,7 +226,7 @@ public:
         if(currentPath.find('?')!=std::string::npos){auto base=pageBase(currentPath);auto type=kind;button(body,"First page",[this,base,type]{browse(base,type);});}
         focus();
     }
-    void playing(){if(!loggedIn)return;endQR();inSettings=false;now=true;++generation;clear();track=label("Nothing playing",30);progress=label("0:00 / 0:00");
+    void playing(){if(!loggedIn){loginScreen("Sign in to use playback controls.");return;}endQR();inSettings=false;now=true;++generation;clear();track=label("Nothing playing",30);progress=label("0:00 / 0:00");
         button(body,"Play / Pause",[this]{command({{"op","toggle"}});});
         button(body,"Previous",[this]{command({{"op","previous"}});});button(body,"Next",[this]{command({{"op","next"}});});
         button(body,"Seek −15 seconds",[this]{command({{"op","seek"},{"seconds",std::max(0.0,state.value("position",0.0)-15)}});});

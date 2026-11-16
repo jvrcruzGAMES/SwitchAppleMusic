@@ -18,9 +18,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y build-essential ffmpeg
+      - run: sudo apt-get update && sudo apt-get install -y build-essential ffmpeg libcurl4-openssl-dev
       - run: python scripts/build-audio-ffmpeg.py --target host --jobs 2
       - run: python scripts/test-audio-ffmpeg.py
+      - run: python scripts/test-player.py
   switch:
     runs-on: ubuntu-latest
     # The image includes the toolchain and Switch portlibs; no package sync is needed.

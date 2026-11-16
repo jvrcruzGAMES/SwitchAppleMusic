@@ -13,7 +13,7 @@ include_directories(${GLM_INCLUDE_DIR})
 add_subdirectory(third_party/borealis/library)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
-pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
+include(${CMAKE_SOURCE_DIR}/toolchain/AudioFFmpeg.cmake)
 add_library(switchmusic_common STATIC common/src/client.cpp)
 target_include_directories(switchmusic_common PUBLIC common/include third_party/json)
 target_link_libraries(switchmusic_common PUBLIC PkgConfig::CURL ${CURL_STATIC_LIBRARIES} nx)
@@ -34,11 +34,12 @@ add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/switchmusic-sys.romfs
     COMMAND ${NX_BUILD_ROMFS_EXE} ${CMAKE_SOURCE_DIR}/resources ${CMAKE_BINARY_DIR}/switchmusic-sys.romfs
     DEPENDS ${CMAKE_SOURCE_DIR}/resources/certs/cacert.pem ${CMAKE_SOURCE_DIR}/resources/certs/LICENSE.txt ${CMAKE_SOURCE_DIR}/resources/certs/README.md)
 add_custom_target(sysmodule-romfs ALL DEPENDS ${CMAKE_BINARY_DIR}/switchmusic-sys.romfs)
-set(SWITCHMUSIC_HEAP_MB 32 CACHE STRING "Sysmodule heap in MiB")
-add_executable(switchmusic-sys sysmodule/source/main.cpp)
+set(SWITCHMUSIC_HEAP_MB 8 CACHE STRING "Sysmodule heap in MiB")
+add_executable(switchmusic-sys sysmodule/source/main.cpp sysmodule/source/http_input.cpp sysmodule/source/audio_decoder.cpp)
+target_include_directories(switchmusic-sys PRIVATE sysmodule/include)
 target_compile_definitions(switchmusic-sys PRIVATE SWITCHMUSIC_HEAP_MB=${SWITCHMUSIC_HEAP_MB})
-target_link_directories(switchmusic-sys PRIVATE ${MPV_STATIC_LIBRARY_DIRS})
-target_link_libraries(switchmusic-sys PRIVATE switchmusic_common PkgConfig::MPV ${MPV_STATIC_LIBRARIES} glapi drm_nouveau)
+target_link_libraries(switchmusic-sys PRIVATE switchmusic_common SwitchMusic::AudioFFmpeg)
+target_link_options(switchmusic-sys PRIVATE "-Wl,-Map,${CMAKE_BINARY_DIR}/switchmusic-sys.map")
 add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/switchmusic-sys.nsp
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/exefs
     COMMAND ${NX_ELF2NSO_EXE} $<TARGET_FILE:switchmusic-sys> ${CMAKE_BINARY_DIR}/exefs/main

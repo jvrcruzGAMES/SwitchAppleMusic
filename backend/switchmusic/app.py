@@ -16,6 +16,7 @@ from .accounts import Accounts
 from .apple import Apple, KINDS, normalize
 from .playback import Playback
 from .lyrics import lyrics
+from .hls import playlist
 
 COOKIE='switchmusic_session'
 WEB=Path(__file__).parent/'web'
@@ -214,8 +215,18 @@ def create_app(settings=None,transport=None):
     async def resolve(kind: str,resource_id: str,principal: Principal=Depends(current)):
         if kind not in ('songs','library-songs'):raise HTTPException(422,'Only songs are playable')
         song=await apple(principal).catalog_song(kind,valid_id(resource_id))
-        result=normalize(song);result['stream_path']='/v1/stream/'+song['id']
+        result=normalize(song);result['stream_path']='/v1/stream/'+song['id'];result['playback_path']='/v1/playback/'+song['id']+'.m3u8'
         return result
+
+    @app.get('/v1/playback/{song_id}.m3u8')
+    async def manifest(song_id: str,principal: Principal=Depends(current)):
+        if not re.fullmatch(r'[0-9]{1,20}',song_id):raise HTTPException(400,'Expected numeric catalog ID')
+        song=await apple(principal).catalog_song('songs',song_id)
+        path=await app.state.playback.materialize(song_id,acquire=True)
+        try:
+            text=await asyncio.to_thread(playlist,path,song_id,song.get('attributes',{}).get('durationInMillis',0)/1000)
+            return Response(text,media_type='application/vnd.apple.mpegurl')
+        finally:app.state.playback.release(path)
 
     @app.get('/v1/stream/{song_id}')
     async def stream(song_id: str,principal: Principal=Depends(current)):

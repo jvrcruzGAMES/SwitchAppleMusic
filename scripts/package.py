@@ -15,7 +15,11 @@ def pfs_entries(data):
     count, strings_size = struct.unpack_from('<II', data, 4)
     strings = 16 + 24 * count
     payload = strings + strings_size
-    files = {}
+    metadata=json.loads((ROOT/'build-ffmpeg/switch/switchmusic-build.json').read_text())
+    source=ROOT/'build-ffmpeg'/('source-'+metadata['source_fingerprint'][:12])
+    files = {
+        'SwitchMusic-LICENSES/FFmpeg-LGPL-2.1.txt': source/'COPYING.LGPLv2.1',
+        'SwitchMusic-LICENSES/FFmpeg-LICENSE.md': source/'LICENSE.md',}
     for i in range(count):
         offset, size, name_offset = struct.unpack_from('<QQI', data, 16 + 24 * i)
         name = data[strings + name_offset:].split(b'\0', 1)[0].decode()
@@ -50,6 +54,19 @@ def validate_certificates(build,nro):
         assert romfs_file(image,'cacert.pem')==expected, 'Bundled CA trust store differs from source'
         assert romfs_file(image,'LICENSE.txt')==(ROOT/'resources/certs/LICENSE.txt').read_bytes(), 'Missing CA license'
 
+def memory_report(nso):
+    # NSO decompressed loadable sections, plus BSS (including the fixed heap).
+    align=lambda value:(value+4095)&~4095
+    sizes=[struct.unpack_from('<I',nso,offset)[0] for offset in (0x18,0x28,0x38,0x3c)]
+    baseline=sum(align(size) for size in sizes)
+    reserve=4*1024*1024
+    total=baseline+reserve
+    assert total<=22000000, f'Sysmodule exceeds 22 MB planning goal: {total} bytes'
+    return {'scope':'Actual FFmpeg sysmodule NSO; hardware runtime peak remains unmeasured',
+            'loadable_sections_and_bss_bytes':baseline,'reserved_heap_bytes':8*1024*1024,
+            'additional_platform_allowance_bytes':reserve,'planning_total_bytes':total,
+            'goal_bytes':22000000,'hard_limit_bytes':36600000}
+
 def validate_toolbox(path):
     metadata = json.loads(path.read_text())
     if not isinstance(metadata, dict) or not isinstance(metadata.get('name'), str) or not metadata['name'].strip():
@@ -70,6 +87,7 @@ def validate(build):
     assert ovl[16:20] == b'NRO0' and ovl[-4:] == b'ULTR', 'Invalid overlay/signature'
     entries = pfs_entries((build / 'switchmusic-sys.nsp').read_bytes())
     assert entries['main'][:4] == b'NSO0', 'Invalid sysmodule NSO'
+    memory_report(entries['main'])
     npdm = entries['main.npdm']
     assert npdm[:4] == b'META', 'Invalid NPDM'
     aci_offset = struct.unpack_from('<I', npdm, 0x70)[0]
@@ -82,7 +100,11 @@ def main():
     p.add_argument('--output', type=Path, default=ROOT/'dist/SwitchMusic-sdcard.zip')
     args = p.parse_args()
     validate(args.build)
+    metadata=json.loads((ROOT/'build-ffmpeg/switch/switchmusic-build.json').read_text())
+    source=ROOT/'build-ffmpeg'/('source-'+metadata['source_fingerprint'][:12])
     files = {
+        'SwitchMusic-LICENSES/FFmpeg-LGPL-2.1.txt': source/'COPYING.LGPLv2.1',
+        'SwitchMusic-LICENSES/FFmpeg-LICENSE.md': source/'LICENSE.md',
         'switch/SwitchMusic/SwitchMusic.nro': args.build/'SwitchMusic.nro',
         'switch/.overlays/switchmusic.ovl': args.build/'switchmusic.ovl',
         f'atmosphere/contents/{TITLE:016X}/exefs.nsp': args.build/'switchmusic-sys.nsp',
@@ -100,12 +122,15 @@ def main():
         'SwitchMusic-LICENSES/nlohmann-json.txt': ROOT/'third_party/json/LICENSE.MIT',
     }
     manifest = {name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()}
+    memory=json.dumps(memory_report(pfs_entries((args.build/'switchmusic-sys.nsp').read_bytes())['main']),indent=2)+'\n'
+    manifest['SwitchMusic-memory.json']=hashlib.sha256(memory.encode()).hexdigest()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(args.output, 'w', ZIP_DEFLATED) as archive:
         # Keep the full install tree even while boot activation remains opt-in.
         archive.writestr(f'atmosphere/contents/{TITLE:016X}/flags/', b'')
         for name,path in files.items():
             archive.write(path, name)
+        archive.writestr('SwitchMusic-memory.json',memory)
         archive.writestr('SwitchMusic-SHA256.json', json.dumps(manifest,indent=2)+'\n')
     print(f'Validated NRO, overlay, NSP and program ID; wrote {args.output}')
 

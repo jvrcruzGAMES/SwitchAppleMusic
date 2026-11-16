@@ -9,19 +9,22 @@ class Playback:
     def __init__(self, settings, apple):
         self.s, self.apple = settings, apple
         self.active = {}
+        self.touched = {}
         self.lock = asyncio.Lock()  # wrapper's account/session has one playback pipeline
         self.s.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def prune(self, reserve=0):
         now = time.time()
-        files = sorted(self.s.cache_dir.glob("*.m4a"), key=lambda p: p.stat().st_mtime)
+        self.touched={p:t for p,t in self.touched.items() if p.exists()}
+        files = sorted(self.s.cache_dir.glob("*.m4a"), key=lambda p: self.touched.get(p,p.stat().st_mtime))
         total = sum(p.stat().st_size for p in files)
         for p in files:
             size = p.stat().st_size
             if self.active.get(p, 0):
                 continue
-            if now - p.stat().st_mtime > self.s.cache_ttl or total + reserve > self.s.max_cache_bytes:
+            if now - self.touched.get(p,p.stat().st_mtime) > self.s.cache_ttl or total + reserve > self.s.max_cache_bytes:
                 p.unlink(missing_ok=True)
+                self.touched.pop(p,None)
                 total -= size
         if total + reserve > self.s.max_cache_bytes:
             raise HTTPException(503, "Audio cache is busy; retry after active playback requests finish")
@@ -36,6 +39,7 @@ class Playback:
             self.prune()
             target = self.s.cache_dir / (song_id + ".m4a")
             if target.exists():
+                self.touched[target]=time.time()
                 if acquire:
                     self.active[target] = self.active.get(target, 0) + 1
                 return target
@@ -45,6 +49,7 @@ class Playback:
                 async with asyncio.timeout(180):
                     await self.render(song_id, temp)
                 temp.replace(target)
+                self.touched[target]=time.time()
                 if acquire:
                     self.active[target] = self.active.get(target, 0) + 1
                 return target
@@ -88,3 +93,27 @@ class Playback:
                             if size > self.s.max_track_bytes:
                                 raise HTTPException(413, "Track exceeds configured memory cache limit")
                             output.write(chunk)
+        await self.fragment(target)
+
+    async def fragment(self,target):
+        # A second bounded host file is used only during a lossless codec-copy remux.
+        self.prune(target.stat().st_size+self.s.max_track_bytes)
+        output=target.with_suffix('.fragmented')
+        process=None
+        try:
+            process=await asyncio.create_subprocess_exec(
+                'ffmpeg','-hide_banner','-loglevel','error','-nostdin','-y','-protocol_whitelist','file','-i',str(target),
+                '-map','0:a:0','-c:a','copy','-vn','-f','mp4',
+                '-movflags','+empty_moov+default_base_moof+frag_keyframe+global_sidx',
+                '-frag_duration','2000000','-fs',str(self.s.max_track_bytes),str(output),
+                stdout=asyncio.subprocess.DEVNULL,stderr=asyncio.subprocess.DEVNULL)
+            if await process.wait()!=0:raise HTTPException(502,'Audio fragmentation failed')
+            if not output.exists() or not 0<output.stat().st_size<self.s.max_track_bytes:
+                raise HTTPException(413,'Fragmented track exceeds configured cache limit')
+            output.replace(target)
+        except FileNotFoundError:
+            raise HTTPException(503,'Install FFmpeg on the backend host') from None
+        finally:
+            if process is not None and process.returncode is None:
+                process.kill();await process.wait()
+            output.unlink(missing_ok=True)

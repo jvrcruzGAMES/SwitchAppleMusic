@@ -4,24 +4,27 @@ An experimental three-part Nintendo Switch Apple Music client, with a self-hoste
 
 | Component | Implementation | Output |
 | --- | --- | --- |
-| Background player | libnx sysmodule + switch-libmpv, HOS audio renderer | `switchmusic-sys.nsp` |
+| Background player | libnx sysmodule + reduced FFmpeg, Horizon audout | `switchmusic-sys.nsp` |
 | In-game controls | [libultrahand](https://github.com/ppkantorski/libultrahand) | `switchmusic.ovl` |
 | Library interface | [dragonflylee/borealis](https://github.com/dragonflylee/borealis) | `SwitchMusic.nro` |
 | Backend | Python/FastAPI, official Apple Music API, wrapper-v2 bridge, syncedlyrics | Docker image |
 
-The NRO browses your library songs, albums, playlists, and their tracks. Selecting a song sends a queue to the sysmodule. Both interfaces control pause, previous/next, seek, volume, and stop. The sysmodule advances through subsequent library pages without keeping the NRO open. The NRO displays the current and upcoming lyric lines against mpv's playback position.
+The NRO browses your library songs, albums, playlists, and their tracks. Selecting a song sends a queue to the sysmodule. Both interfaces control pause, previous/next, seek, volume, and stop. The sysmodule advances through subsequent library pages without keeping the NRO open. The NRO displays the current and upcoming lyric lines against the background player's audio output position.
 
-**Status:** all three native outputs cross-compile. Backend and framing tests pass. No Switch hardware or authenticated Apple Music account was available for end-to-end validation. The stock mpv/FFmpeg build produces a sysmodule with about **81 MiB of ELF text/data/BSS**, including a configurable 32 MiB heap, before extra thread/service allocations. A suitably sized system memory pool or a smaller audio-only mpv/FFmpeg build is required; this is not a verified drop-in module for a default Atmosphere installation. See [validation and remaining limitations](docs/VALIDATION.md).
+**Status:** the sysmodule now uses direct FFmpeg decoding and Horizon `audout`, following [sys-tune's small reusable audio-buffer design](https://github.com/HookedBehemoth/sys-tune). libmpv is no longer linked. The native applications compile, and host tests exercise the production decoder over authenticated HTTP. Physical Switch and live Apple playback validation remain necessary.
 
-## Low-memory FFmpeg build (Option 2)
+## Low-memory FFmpeg player
 
-A separate audio-only Switch FFmpeg SDK now supports **AAC, AAC-web and ALAC**, with Atmos/AC-3 excluded. Its cross-linked decoder + HTTP/control + HOS-audio fixture is **11.92 MB**, including an 8 MiB heap. Adding a 4 MiB platform allowance gives a **16.11 MB planning budget**, below the 22 MB target and 36.6 MB maximum. This is not an on-device peak measurement, and the existing mpv sysmodule has not been replaced by this SDK.
+The player supports **AAC, AAC-web and ALAC**, with Atmos/AC-3 excluded. The actual sysmodule has approximately **12.05 MB of page-aligned loadable code/data/BSS**, including its reserved **8 MiB heap**. With an additional 4 MiB platform allowance, the planning total is approximately **16.25 MB**, below the **22 MB goal** and **36.6 MB maximum**. This is a linked-image calculation, not a measured hardware runtime peak. Packaging enforces the planning goal and includes `SwitchMusic-memory.json`.
+
+Audio stays off the SD card. The backend provides a single-file, byte-range fMP4 M3U8; custom FFmpeg AVIO reads it through a bounded 256 KiB HTTP range cache and supports remote seeking. A 64 KiB PCM pool feeds Horizon audio output. See [the player, transport and memory details](docs/AUDIO_FFMPEG.md).
 
 ```sh
 python3 scripts/build-audio-ffmpeg.py --target switch
 python3 scripts/check-audio-budget.py
 python3 scripts/build-audio-ffmpeg.py --target host
 python3 scripts/test-audio-ffmpeg.py
+python3 scripts/test-player.py
 python3 scripts/package-audio-ffmpeg.py
 ```
 
@@ -33,20 +36,21 @@ Install devkitPro, devkitA64, libnx, switch-tools, CMake, and the Switch package
 
 ```sh
 (dkp-)pacman -S switch-dev switch-cmake switch-curl switch-zlib switch-minizip \
-  switch-mbedtls switch-glm switch-libmpv switch-libplacebo switch-libjpeg-turbo
+  switch-mbedtls switch-glm switch-libjpeg-turbo
 ```
 
-`(dkp-)pacman` means use your installation's `dkp-pacman` or `pacman` command. mpv's package also needs its FFmpeg, SDL2, EGL, libass and other transitive dependencies. Dependencies must be Switch builds, not host libraries.
+`(dkp-)pacman` means use your installation's `dkp-pacman` or `pacman` command. Build the isolated FFmpeg prefix below; the stock video-capable FFmpeg/mpv portlibs are not used. Dependencies must be Switch builds, not host libraries.
 
 ```sh
 git submodule update --init --recursive
 export DEVKITPRO=/opt/devkitpro
-cmake -S . -B build-switch -DCMAKE_BUILD_TYPE=Release
+python3 scripts/build-audio-ffmpeg.py --target switch
+cmake -S . -B build-switch -DCMAKE_BUILD_TYPE=Release -DSWITCHMUSIC_HEAP_MB=8
 cmake --build build-switch -j4
 python3 scripts/package.py --build build-switch
 ```
 
-Outputs are in `build-switch/`; the SD-card archive is `dist/SwitchMusic-sdcard.zip`. Change the heap with `-DSWITCHMUSIC_HEAP_MB=32` after measuring your build. The sysmodule uses audio only (`vo=null`, `video=no`, `ao=hos`).
+Outputs are in `build-switch/`; the SD-card archive is `dist/SwitchMusic-sdcard.zip`. The default heap is 8 MiB. Packaging rejects a module whose linked footprint plus the platform allowance exceeds 22 MB.
 
 ## Create a GitHub release
 
@@ -54,7 +58,7 @@ Open **Actions → Release SD card package → Run workflow**. Select the source
 
 CI and release builds run in the prebuilt `devkitpro/devkita64:latest` Docker image, using its installed toolchain and Switch portlibs without running `dkp-pacman` or synchronizing devkitPro package repositories.
 
-The workflow builds all three Switch components and publishes a release containing **`sdout.zip`** and **`sdout.zip.sha256`**. Extract the ZIP directly to the SD root; it includes the `switch`, `atmosphere/contents/420000000000534D/flags`, and `config/switchmusic` folders. Your existing configuration is preserved; configure the supplied example for your backend. Boot activation remains manual as described below.
+The workflow builds the reduced FFmpeg dependency and all three Switch components, then publishes **`sdout.zip`**, its SHA-256 checksum, and the corresponding patched FFmpeg source archive. Extract the ZIP directly to the SD root; it includes the `switch`, `atmosphere/contents/420000000000534D/flags`, and `config/switchmusic` folders. Your existing configuration is preserved; configure the supplied example for your backend. Boot activation remains manual as described below.
 
 A new tag points to the selected workflow source commit. If the tag already exists, its exact commit is built instead. Existing releases are not overwritten. The workflow uses GitHub's built-in token and needs no additional repository secret. Creating/pushing a tag alone does not trigger this workflow.
 
@@ -74,7 +78,7 @@ All playback uses the server's authenticated wrapper-v2 subscriber. Linking diff
 
 Synchronized lyrics are gathered through the `syncedlyrics` Python package. No Musixmatch API key is required. Only timed lyrics are requested; unavailable lyrics are reported without invented timing.
 
-Compose runs under the configured non-root host UID/GID with a read-only root filesystem. Only the Apple private key is mounted as a secret; accounts and encrypted library links live in the persistent data volume. wrapper-v2 runs separately; `host.docker.internal` resolves to the Docker host on Linux. The image installs a pinned Gamdl revision for wrapper-v2 HLS/sample handling and never uses Widevine.
+Compose runs under the configured non-root host UID/GID with a read-only root filesystem. Only the Apple private key is mounted as a secret; accounts and encrypted library links live in the persistent data volume. wrapper-v2 runs separately; `host.docker.internal` resolves to the Docker host on Linux. The image installs a pinned Gamdl revision for wrapper-v2 HLS/sample handling and host FFmpeg for codec-copy fMP4 fragmentation. It never uses Widevine. Install `ffmpeg` on the host when running without Docker.
 
 For local development:
 
@@ -94,12 +98,12 @@ Use an Atmosphere-capable Switch with a supported Ultrahand/nx-ovlloader setup. 
 1. Extract the SD-card archive to the SD root. It contains the NRO at `switch/SwitchMusic/SwitchMusic.nro`, the overlay at `switch/.overlays/switchmusic.ovl`, and the sysmodule at `atmosphere/contents/420000000000534D/exefs.nsp`, and its certificate RomFS at `atmosphere/contents/420000000000534D/romfs.bin`.
 2. Launch the NRO in **application mode** (title takeover) and sign in with your server URL and backend account. Each input opens Nintendo’s software keyboard; password input is masked. A missing, expired or revoked login returns to this screen. Sessions expire after 12 hours; reopening the app validates the saved session, and it checks again every 30 seconds while open. The NRO automatically saves the URL, username and session in `config/switchmusic/config.json`. Account passwords are not saved. Use **Sign out** to remove the saved session and request server-side logout.
 3. Open **Hekate Toolbox → Background services**, find **SwitchMusic**, and toggle it **On**. The packaged `atmosphere/contents/420000000000534D/toolbox.json` declares `requires_reboot: false`, so Toolbox can launch and terminate it without rebooting. Toolbox also updates `flags/boot2.flag` for the next boot; the archive initially omits this activation file. Configuration/startup failures are written to `config/switchmusic/fatal.log`. Without Toolbox, create `flags/boot2.flag` manually and reboot.
-4. Browse a collection or search the catalog and select a song. The first song takes time to prepare: the backend materializes a temporary decrypted AAC/fMP4, then the sysmodule stages it on SD before mpv opens it. Two rotating SD files are limited to 64 MiB each. Playback stays in the sysmodule when the NRO closes.
+4. Browse a collection or search the catalog and select a song. The first song takes time to prepare: the backend decrypts and remuxes AAC/ALAC into its bounded host cache, then the sysmodule streams the M3U8 media through bounded HTTP byte ranges. No audio is staged on SD. Playback stays in the sysmodule when the NRO closes.
 5. Open the SwitchMusic overlay from Ultrahand to control the background player.
 
 Both the NRO and sysmodule use the bundled Mozilla/curl CA trust store from RomFS, with TLS verification enabled. There is no `ca_bundle` setting or separate certificate download. Install the complete archive when upgrading so all three components use the same session-based control protocol. Protect the SD card: its saved session grants account access until expiration or revocation. The sysmodule can start before login; it and the overlay reload saved login changes automatically.
 
-To disable the module immediately, toggle **SwitchMusic → Off** in Hekate Toolbox. This terminates the process, interrupts playback and pending work, and removes `flags/boot2.flag`. Toggle it **On** again to start a fresh process; the playback queue is not restored. The NRO/overlay reconnect on their next state poll. Merely deleting `boot2.flag` changes the next boot; it does not stop a currently running process. Without Toolbox, remove the flag and reboot. Stop the module before removing its title directory to uninstall it. Remove `config/switchmusic/audio-*.m4a` to clear staged audio. The backend's cache is bounded, expires after 30 minutes, and lives on Docker tmpfs; it disappears when the container is recreated.
+To disable the module immediately, toggle **SwitchMusic → Off** in Hekate Toolbox. This terminates the process, interrupts playback and pending work, and removes `flags/boot2.flag`. Toggle it **On** again to start a fresh process; the playback queue is not restored. The NRO/overlay reconnect on their next state poll. Merely deleting `boot2.flag` changes the next boot; it does not stop a currently running process. Without Toolbox, remove the flag and reboot. Stop the module before removing its title directory to uninstall it. Old `config/switchmusic/audio-*.m4a` files from earlier builds can be deleted; the new player does not create them. The backend's cache is bounded, expires after 30 minutes without access, and lives on Docker tmpfs; it disappears when the container is recreated.
 
 The original project code is MIT licensed. Dependencies retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md). Apple Music, Nintendo Switch and Musixmatch are their respective owners' marks; this project is independent.
 

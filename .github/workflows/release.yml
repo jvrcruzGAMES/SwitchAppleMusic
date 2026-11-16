@@ -68,6 +68,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if grep -q 'SwitchMusic::AudioFFmpeg' CMakeLists.txt; then
+            python3 scripts/build-audio-ffmpeg.py --target switch --jobs 2
+          fi
           cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
           cmake --build build-release --parallel 2
       - name: Assemble SD root archive and checksum
@@ -75,6 +78,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/package.py --build build-release --output dist/sdout.zip
+          if grep -q -- '--source-only' scripts/package-audio-ffmpeg.py 2>/dev/null; then
+            python3 scripts/package-audio-ffmpeg.py --source-only
+          fi
           (cd dist && sha256sum sdout.zip > sdout.zip.sha256)
           python3 -m zipfile --test dist/sdout.zip
       - uses: actions/upload-artifact@v4
@@ -83,6 +89,8 @@ jobs:
           path: |
             dist/sdout.zip
             dist/sdout.zip.sha256
+            dist/switch-ffmpeg-audio-7.1-source.tar.xz
+            dist/switch-ffmpeg-audio-7.1-source.tar.xz.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -129,6 +137,7 @@ jobs:
           - `switch/SwitchMusic/SwitchMusic.nro`
           - `switch/.overlays/switchmusic.ovl`
           - `atmosphere/contents/420000000000534D/exefs.nsp`
+          - `atmosphere/contents/420000000000534D/romfs.bin`
           - `atmosphere/contents/420000000000534D/toolbox.json`
           - `atmosphere/contents/420000000000534D/flags/`
           - `config/switchmusic/config.example.json`
@@ -138,7 +147,7 @@ jobs:
 
           Use Hekate Toolbox → Background services → SwitchMusic to enable or disable the module live, without rebooting. The toggle also controls automatic startup on future boots.
 
-          The experimental sysmodule is included without `boot2.flag`. The current mpv player has not yet been replaced by the low-memory FFmpeg player; check the included validation notes and available sysmodule memory before enabling it.
+          The experimental sysmodule is included without `boot2.flag`. Check the included memory report (when available) and validation notes for the selected source tag before enabling it.
           NOTES
           printf '\nBuilt from commit %s.\n' "$BUILD_COMMIT" >> "$notes"
           options=()
@@ -146,8 +155,11 @@ jobs:
             options+=(--prerelease)
           fi
           # gh creates a missing tag at BUILD_COMMIT; an existing release is never overwritten.
-          gh release create "$RELEASE_TAG" \
-            dist/sdout.zip dist/sdout.zip.sha256 \
+          assets=(dist/sdout.zip dist/sdout.zip.sha256)
+          if [[ -f dist/switch-ffmpeg-audio-7.1-source.tar.xz ]]; then
+            assets+=(dist/switch-ffmpeg-audio-7.1-source.tar.xz dist/switch-ffmpeg-audio-7.1-source.tar.xz.sha256)
+          fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" \
             --target "$BUILD_COMMIT" --title "$RELEASE_TAG" \
             --notes-file "$notes" --generate-notes "${options[@]}"
           printf 'Published release %s with sdout.zip and its SHA-256 checksum.\n' "$RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"

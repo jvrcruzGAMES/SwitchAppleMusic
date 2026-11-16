@@ -2,24 +2,15 @@
 
 This is the isolated FFmpeg build for the Option 2 player: native AAC and ALAC decoding, without mpv. AAC-web uses the same AAC bitstream decoder; its delivery/decryption happens on the backend. Atmos/E-AC-3 and AC-3 decoders are excluded.
 
-## Measured result
+## Production player and memory
 
-With devkitA64 GCC 16.1.0, the cross-linked decoder/HTTP/control/HOS-audio budget probe measures:
+The `switchmusic-sys` target now links this profile directly and uses Horizon `audout`; libmpv is removed. The output design follows [sys-tune](https://github.com/HookedBehemoth/sys-tune/blob/24132cfa26e569011a2028790575cd474f32cf95/sys-tune/source/impl/music_player.cpp): a small fixed set of page-aligned PCM buffers is reused only after the audio service releases it. SwitchMusic implements this pattern independently, with four 4096-frame stereo buffers (64 KiB total).
 
-| Allocation | Bytes | Decimal MB |
-| --- | ---: | ---: |
-| Code and read-only data | 1,966,503 | 1.97 |
-| Initialized data | 183,032 | 0.18 |
-| BSS, including the reserved 8 MiB heap | 9,764,472 | 9.76 |
-| Page-aligned linked total | 11,919,360 | 11.92 |
-| Additional platform allowance | 4,194,304 | 4.19 |
-| **Planning total** | **16,113,664** | **16.11** |
+The actual packaged NSO currently has approximately **12.05 MB** of page-aligned loadable sections and BSS, including a fixed **8 MiB heap**. Adding a separate **4 MiB platform allowance** gives approximately **16.25 MB**, below the decimal 22,000,000-byte target and 36,600,000-byte hard limit. `scripts/package.py` checks the actual NSO and includes `SwitchMusic-memory.json` in the archive; build-dependent exact values are recorded there. The heap already includes dynamic decoder, HTTP/TLS and PCM allocations. These are linked-image/planning measurements, not a measured Horizon runtime peak or a guaranteed upper bound for kernel/service memory.
 
-The check uses the stricter decimal **22,000,000-byte goal** and **36,600,000-byte hard limit**. The planning total leaves 5,886,336 bytes below the goal. The 8 MiB heap is already included in the linked total; decoder, input and PCM allocations inside it must not be counted a second time.
+Socket buffers are fixed at 16 KiB TCP transmit / 128 KiB receive, 4 KiB UDP transmit/receive, efficiency 2 and two BSD sessions. libnx's transfer-memory formula gives 304 KiB rather than its default pool of over 2 MiB. This pool is allocated from the existing heap. One 256 KiB remote byte-range cache, one 32 KiB AVIO buffer, a 16 KiB PCM conversion scratch buffer, and four 16 KiB output slots bound player-side buffering. The decoder fixture/budget probe remains available as an isolated SDK check, separately from the production package check.
 
-This is a cross-linked budget fixture, **not a measured Horizon process peak**. It links the actual minimal FFmpeg decoder/resampler, current HTTP/control implementation, and HOS renderer APIs. It does not run a complete music player. The separate 4 MiB allowance is a planning reserve, not a proven upper bound for kernel/service allocations. Hardware validation is still required before guaranteeing process memory usage.
-
-The existing `switchmusic-sys` target still uses mpv and does **not** meet this memory budget. Do not replace its FFmpeg archives with this audio-only profile: mpv's video/filter dependencies expect a broader FFmpeg build. The new prefix is for the direct-FFmpeg player integration, not a drop-in replacement for arbitrary devkitPro applications. It does not change the paused SD-staging/transport implementation.
+The backend generates authenticated, single-file fMP4 VOD playlists. Custom AVIO reconstructs the complete seekable MP4 through bounded HTTP Range requests, with stable ETag checks; no audio is staged on the SD card. This is a controlled backend protocol, not a general-purpose HLS client for arbitrary external manifests. Initial wrapper decryption and codec-copy host fragmentation finish before the first manifest is returned. Codec/sample rate/bit depth remain unchanged on the host; the Switch resamples to the platform's 48-kHz stereo output.
 
 ## Build and verify
 
@@ -31,12 +22,13 @@ python3 scripts/check-audio-budget.py
 # Build the identical codec/table profile for host execution.
 python3 scripts/build-audio-ffmpeg.py --target host
 python3 scripts/test-audio-ffmpeg.py
+python3 scripts/test-player.py
 python3 scripts/package-audio-ffmpeg.py
 ```
 
 Required host tools: Python 3.11+, patch, make, a C compiler, and a full host `ffmpeg` executable for generating fixtures. Switch builds require devkitA64 and libnx; the budget probe additionally links the existing Switch curl/zlib packages. The build installs into `build-ffmpeg/switch`, leaving `/opt/devkitpro` untouched. Source downloads and the upstream Switch patch are SHA-256 verified; build metadata records the exact flags and patch fingerprint.
 
-The host decoder tests compare PCM against a full reference FFmpeg, allowing at most one 16-bit quantization step because reference FFmpeg versions can differ. Tests cover progressive AAC at 44.1/48 kHz, fragmented-MP4 AAC, 16-bit ALAC, 24-bit/192-kHz ALAC, fragmented ALAC, and AAC/ALAC fMP4 HLS playlists. A host allocation guard caps tracked FFmpeg allocations at 8 MiB. In the synthetic fixtures the highest tracked allocation peak was approximately 1.03 MB; these short fixtures are not a worst-case workload or a Switch heap measurement. The tests also reject AC-3 and verify AAC transform sizes, including 960/120-sample variants. Fixture MP4 movie timescales match the source sample rate, preserving exact edit durations on older FFmpeg muxers as well. PCM sample counts must still match exactly; this avoids container-duration rounding without weakening the decoder comparison.
+The isolated host decoder tests compare PCM against a full reference FFmpeg, allowing at most one 16-bit quantization step because reference FFmpeg versions can differ. Tests cover progressive AAC at 44.1/48 kHz, fragmented-MP4 AAC, 16-bit ALAC, 24-bit/192-kHz ALAC, fragmented ALAC, and AAC/ALAC fMP4 HLS playlists. A host allocation guard caps tracked FFmpeg allocations at 8 MiB. In the synthetic fixtures the highest tracked allocation peak was approximately 1.03 MB; these short fixtures are not a worst-case workload or a Switch heap measurement. The tests also reject AC-3 and verify AAC transform sizes, including 960/120-sample variants. Fixture MP4 movie timescales match the source sample rate, preserving exact edit durations on older FFmpeg muxers as well. PCM sample counts must still match exactly; this avoids container-duration rounding without weakening the decoder comparison.
 
 ## Configuration and table changes
 
@@ -48,7 +40,7 @@ The host decoder tests compare PCM against a full reference FFmpeg, allowing at 
 - Native ARMv8/Cortex-A57/NEON, static/PIC, section garbage collection, size optimization, no debug/unwind tables.
 - Split-radix FFT tables/codelets above **131072** removed. `av_tx_init` rejects larger transform requests, preventing access past the remaining initialization tables. This preserves all AAC transform sizes and the existing AArch64 NEON transform range. It removes oversized static buffers rather than depending on linker garbage collection to discard referenced tables.
 
-The decoder harness uses one codec thread, a 256 KiB probe limit, a 128 KiB index limit, one packet/frame at a time, and a 16 KiB PCM conversion buffer. It validates source rates up to 192 kHz and up to eight input channels, then converts to 48-kHz stereo PCM in bounded chunks. These settings are a reference for the future player; they are not silently applied to the old mpv process.
+The decoder harness uses one codec thread, a 256 KiB probe limit, a 128 KiB index limit, one packet/frame at a time, and a 16 KiB PCM conversion buffer. It validates source rates up to 192 kHz and up to eight input channels, then converts to 48-kHz stereo PCM in bounded chunks. The production player applies these limits and adds a 2 MiB limit per FFmpeg allocation.
 
 `toolchain/AudioFFmpeg.cmake` supplies the `SwitchMusic::AudioFFmpeg` interface target for the direct player. Set `SWITCHMUSIC_AUDIO_FFMPEG_PREFIX` to this isolated prefix. Never allow host or stock Switch FFmpeg archives to precede it in the link search path.
 
@@ -58,7 +50,7 @@ The exact preference order is **ALAC → AAC → AAC-web**. Gamdl's generic ALAC
 
 All decryption stays on wrapper-v2; no Widevine or PlayReady backend/extra is installed or invoked. The pinned Gamdl 4.0 stream adapter normally excludes web-playback streams from wrapper eligibility, so AAC-web with actual FairPlay `skd://` metadata is adapted to its generic wrapper-audio path while preserving the original manifest and codec. A missing compatible key URI is reported as an error; no URI is fabricated and encrypted output is never passed through. Live AAC-web account playback still needs verification against the operator's working wrapper setup.
 
-The backend keeps its existing bounded server-side cache. Its per-track limit is now 256 MiB to accommodate ALAC; the default total remains 512 MiB. `MAX_TRACK_BYTES` and `MAX_CACHE_BYTES` can override those host limits. Codec priority falls back when a rendition is unavailable, not after authorization/decryption errors or a cache-limit failure.
+The backend keeps a bounded server-side cache, including temporary remux space. Its per-track limit is now 256 MiB to accommodate ALAC; the default total remains 512 MiB. `MAX_TRACK_BYTES` and `MAX_CACHE_BYTES` can override those host limits. Codec priority falls back when a rendition is unavailable, not after authorization/decryption errors or a cache-limit failure.
 
 ## Source provenance
 

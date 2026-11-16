@@ -47,7 +47,7 @@ def main():
             'reserved_heap_bytes':8*1024*1024,'additional_platform_allowance_bytes':reserve,
             'planning_total_bytes':budget,'goal_bytes':22000000,'hard_limit_bytes':36600000,
             'passes_goal':budget<=22000000,'passes_hard_limit':budget<=36600000,
-            'scope':'Decoder + existing HTTP/control code + HOS audio linkage; not a hardware runtime measurement or the existing mpv sysmodule'}
+            'scope':'Decoder + existing HTTP/control code + HOS audio linkage; isolated SDK probe, not the production player or a hardware runtime measurement'}
     (out/'memory-report.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))
     if budget>22000000:raise SystemExit('Audio profile exceeds the 22 MB planning budget')

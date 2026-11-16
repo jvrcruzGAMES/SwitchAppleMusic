@@ -67,12 +67,6 @@ static size_t collect(char* p, size_t a, size_t b, void* data) {
     if (out.size()+n > 2*1024*1024) return 0;
     out.append(p,n); return n;
 }
-struct Sink { FILE* f; size_t bytes=0; };
-static size_t save(char* p,size_t a,size_t b,void* data) {
-    auto& s=*static_cast<Sink*>(data);size_t n=a*b;
-    if(s.bytes+n>64*1024*1024) return 0;
-    size_t written=fwrite(p,1,n,s.f);s.bytes+=written;return written;
-}
 static std::string request(const Config& c,const std::string& path,void* out,curl_write_callback write,long timeout,const Json* body=nullptr,const std::string& csrf="") {
     if(path.empty()||path[0]!='/'||path.rfind("//",0)==0) throw std::runtime_error("Invalid API path");
     std::unique_ptr<CURL,decltype(&curl_easy_cleanup)> h(curl_easy_init(),curl_easy_cleanup);
@@ -126,12 +120,6 @@ Json api(const Config& c,const std::string& path) {
     std::string raw;request(c,path,&raw,collect,35);
     auto j=Json::parse(raw,nullptr,false);
     if(j.is_discarded()) throw std::runtime_error("Invalid backend JSON");return j;
-}
-void download(const Config& c,const std::string& path,const std::string& file) {
-    std::unique_ptr<FILE,decltype(&fclose)> f(fopen(file.c_str(),"wb"),fclose);
-    if(!f) throw std::runtime_error("Cannot create audio cache on SD card");
-    Sink sink{f.get()};request(c,path,&sink,save,240);
-    if(!sink.bytes) throw std::runtime_error("Empty audio stream");
 }
 static bool transfer(int fd,void* data,size_t n,bool sending) {
     auto* p=static_cast<char*>(data);

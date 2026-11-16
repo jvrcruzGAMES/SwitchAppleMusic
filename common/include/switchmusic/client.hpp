@@ -25,7 +25,6 @@ std::string encode(const std::string& value);
 Json api(const Config&, const std::string& path);
 Json signIn(Config, const std::string& password);
 void signOut(const Config&);
-void download(const Config&, const std::string& path, const std::string& file);
 Json control(const Config&, Json request);
 bool receiveFrame(int fd, Json& value);
 bool sendFrame(int fd, const Json& value);

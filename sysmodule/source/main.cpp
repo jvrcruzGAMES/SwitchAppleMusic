@@ -2,6 +2,7 @@
 #include <switchmusic/client.hpp>
 #include <switchmusic/ipc.hpp>
 #include <switchmusic/control_server.hpp>
+#include <switchmusic/artwork_worker.hpp>
 #include <switchmusic/audio.hpp>
 #include <switchmusic/audio_output.hpp>
 #include <curl/curl.h>
@@ -44,6 +45,7 @@ void __appInit() {
 void __appExit() {if(controlPortRegistered){Handle unused;svcManageNamedPort(&unused,ControlServiceName,0);}romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
 }
 class Player {
+    ArtworkWorker artwork;
     Config config;std::mutex lock;std::deque<Json> commands;
     Json state={{"status","stopped"},{"position",0.0},{"duration",0.0},{"volume",70.0},{"paused",false}};
     Json queue=Json::array();size_t index=0;std::string nextPath,manifest;
@@ -64,7 +66,7 @@ class Player {
     void syncConfig(){
         Config next;try{next=Config::load();}catch(...){}
         if(next.backend!=config.backend||next.username!=config.username||next.session!=config.session){
-            stop();queue=Json::array();index=0;nextPath.clear();config=std::move(next);
+            artwork.clear();stop();queue=Json::array();index=0;nextPath.clear();config=std::move(next);
             update({{"status",config.session.empty()?"signed out":"stopped"},{"track",Json::object()},{"duration",0.0},{"error",""},{"http_status",0}});
         }
     }
@@ -76,6 +78,7 @@ class Player {
         update({{"status","loading"},{"error",""},{"http_status",0},{"paused",false},{"queue_index",index},{"queue_size",queue.size()}});
         auto track=queue[index];auto resolved=get("/v1/resolve/"+encode(track.at("type"))+"/"+encode(track.at("id")));
         if(!resolved.contains("playback_path")||!resolved["playback_path"].is_string())throw std::runtime_error("Upgrade the backend for M3U8 playback");
+        artwork.request(config,resolved);
         manifest=resolved["playback_path"];update({{"track",resolved},{"position",0.0},{"duration",resolved.value("duration_ms",0)/1000.0}});
         openDecoder();if(decoder->duration()>0)update({{"duration",decoder->duration()}});update({{"status","playing"}});
     }
@@ -115,6 +118,7 @@ class Player {
     void interrupted(){resumePosition=output->position();output->reset(resumePosition);decoder.reset();started=draining=false;}
 public:
     Json request(const Json& j) {
+        if(j.value("op",std::string{})=="artwork")return artwork.chunk(j);
         std::lock_guard guard(lock);
         if(j.value("op",std::string{})=="state")return state;
         if(commands.size()>=8)return error("Playback command queue full");

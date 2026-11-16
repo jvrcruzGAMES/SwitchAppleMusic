@@ -43,29 +43,14 @@ int main(int argc, char **argv) {
                         {"expires_in", 300},
                         {"matrix", matrix}});
     } else if (scene == "collection" || scene == "long" || scene == "empty") {
-        library.browse("/v1/catalog/search?term=preview", "catalog", "Search results", false);
-        Json rows = Json::array();
-        if (scene != "empty")
-            for (int i = 0; i < 12; ++i)
-                rows.push_back(
-                    {{"id", std::to_string(100 + i)},
-                     {"type", i % 3 == 0 ? "albums" : "songs"},
-                     {"title", scene == "long"
-                                   ? "A very long album or song title that should fit safely within the "
-                                     "track row without overlapping the duration or the sidebar"
-                                   : "Track " + std::to_string(i + 1)},
-                     {"artist",
-                      scene == "long"
-                          ? "An artist name long enough to exercise truncation and safe controller focus"
-                          : "Artist name"},
-                     {"duration_ms", 215000}});
-        library.showPage({{"items", rows}, {"next_offset", 12}});
+        library.browse("/v1/catalog/search?term=" + scene, "catalog", "Search results", false);
     } else if (scene == "player")
         library.playing();
     // Layout frames also exercise the real XML parser, view factories and focus.
-    for (int i = 0; i < 60; ++i) {
+    for (int i = 0; i < 90; ++i) {
         if (!brls::Application::mainLoop()) return 2;
-        library.settleFocus();
+        library.tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     assert(brls::Application::getCurrentFocus());
     auto *root = brls::Application::getCurrentFocus();
@@ -78,6 +63,11 @@ int main(int argc, char **argv) {
         assert(bounds.getWidth() > 600 && bounds.getHeight() >= 70);
         auto title = row->getView("row/title")->getFrame(), type = row->getView("row/type")->getFrame();
         assert(title.getMaxX() <= type.getMinX());
+        auto number = row->getView("row/index")->getFrame();
+        auto *image = dynamic_cast<brls::Image *>(row->getView("row/artwork"));
+        assert(image && image->getTexture() > 0);
+        auto cover = image->getFrame();
+        assert(number.getMaxX() <= cover.getMinX() && cover.getMaxX() <= title.getMinX());
     }
 
     if (scene == "navigation") {
@@ -145,6 +135,9 @@ int main(int argc, char **argv) {
                      "guest visibility passed"
                   << std::endl;
     }
+    dynamic_cast<brls::Label *>(root->getView("shell/status"))->setText("Preview · local artwork fixture");
+    for (int i = 0; i < 3; ++i)
+        assert(brls::Application::mainLoop());
     if (argc > 3) {
         GLint viewport[4];
         glGetIntegerv(GL_VIEWPORT, viewport);

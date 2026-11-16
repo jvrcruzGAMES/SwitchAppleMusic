@@ -5,6 +5,8 @@
 #include <switch.h>
 #endif
 #include <optional>
+#include <atomic>
+#include <unordered_map>
 #include <borealis/core/touch/tap_gesture.hpp>
 #include <thread>
 #include <mutex>
@@ -74,6 +76,7 @@ struct Done {
     Json result;
 };
 class Network {
+    std::atomic<unsigned> artworkGeneration{0};
     Config config;
     std::mutex mutex;
     std::condition_variable cv;
@@ -88,6 +91,7 @@ class Network {
         {
             std::lock_guard guard(mutex);
             stopped = true;
+            ++artworkGeneration;
             pending.clear();
         }
         cv.notify_all();
@@ -115,6 +119,15 @@ class Network {
             pending.end());
         finished.clear();
     }
+    void cancelArtwork(unsigned generation) {
+        artworkGeneration = generation;
+        std::lock_guard guard(mutex);
+        pending.erase(std::remove_if(pending.begin(), pending.end(),
+                                     [&](const Job &job) {
+                                         return job.type == "artwork" && job.generation != generation;
+                                     }),
+                      pending.end());
+    }
     void run() {
         while (true) {
             Job job;
@@ -131,7 +144,12 @@ class Network {
             try {
                 if (job.type == "login")
                     result = signIn(active, job.request.at("password"));
-                else if (job.type == "logout") {
+                else if (job.type == "artwork") {
+                    auto bytes = apiBytes(active, job.path, 128 * 1024, [this, epoch = job.generation] {
+                        return artworkGeneration.load() != epoch;
+                    });
+                    result = {{"bytes", Json::binary(std::move(bytes))}};
+                } else if (job.type == "logout") {
                     signOut(active);
                     result = Json::object();
                 } else if (job.type.rfind("qr_", 0) == 0)
@@ -194,6 +212,10 @@ class Library {
     std::vector<Location> history;
     std::optional<Location> playerReturn;
     std::optional<float> pendingScroll;
+    std::unordered_map<std::string, std::vector<brls::Image *>> artworkViews;
+    std::unordered_map<std::string, std::shared_ptr<std::vector<uint8_t>>> artworkCache;
+    std::deque<std::string> artworkQueue, artworkLRU;
+    bool artworkPending = false;
     std::function<void()> navigation;
     template <class T = brls::View> static T *view(brls::View *root, const std::string &id) {
         auto *found = dynamic_cast<T *>(root->getView(id));
@@ -229,6 +251,10 @@ class Library {
         view<brls::Button>(frame, "nav/account")->setText(loggedIn ? "Settings" : "Account");
     }
     void setPage(const std::string &layout, const std::string &mode) {
+        artworkViews.clear();
+        artworkQueue.clear();
+        artworkPending = false;
+        net.cancelArtwork(generation);
         pendingFocus = nullptr;
         pendingScroll.reset();
         brls::Application::giveFocus(safeFocus);
@@ -409,6 +435,8 @@ class Library {
 #endif
     }
     void loginScreen(const std::string &detail = "") {
+        artworkCache.clear();
+        artworkLRU.clear();
         endQR();
         inSettings = false;
         loggedIn = false;
@@ -435,6 +463,8 @@ class Library {
         focus("login/server");
     }
     void guest() {
+        artworkCache.clear();
+        artworkLRU.clear();
         // Guest browsing validates only the server address, never a half-entered username.
         Config anonymous{config.backend, "", ""};
         try {
@@ -680,6 +710,22 @@ class Library {
             auto *entry = xml("row");
             entry->setId("item/" + std::to_string(i));
             view<brls::Label>(entry, "row/index")->setText(std::to_string(i + 1));
+            auto artwork = item.value("artwork_path", std::string{});
+            if (artwork.rfind("/v1/artwork/", 0) == 0) {
+                auto path = artwork + "?size=64";
+                auto *image = view<brls::Image>(entry, "row/artwork");
+                auto key = config.backend + "\n" + config.session + "\n" + path;
+                auto cached = artworkCache.find(key);
+                if (cached != artworkCache.end()) {
+                    image->setImageFromMem(cached->second->data(), cached->second->size());
+                    artworkLRU.erase(std::remove(artworkLRU.begin(), artworkLRU.end(), key),
+                                     artworkLRU.end());
+                    artworkLRU.push_back(key);
+                } else {
+                    if (!artworkViews.count(path)) artworkQueue.push_back(path);
+                    artworkViews[path].push_back(image);
+                }
+            }
             view<brls::Label>(entry, "row/title")->setText(item.value("title", std::string("Untitled")));
             auto type = item.value("type", std::string{});
             bool song = type == "songs" || type == "library-songs";
@@ -872,6 +918,25 @@ class Library {
                 loginScreen("Your login expired or was revoked. Sign in again, or browse as a guest.");
                 continue;
             }
+            if (job.type == "artwork") {
+                artworkPending = false;
+                if (result.contains("bytes") && result["bytes"].is_binary()) {
+                    auto &bytes = result["bytes"].get_binary();
+                    auto cached = std::make_shared<std::vector<uint8_t>>(bytes.begin(), bytes.end());
+                    auto found = artworkViews.find(job.path);
+                    if (found != artworkViews.end())
+                        for (auto *image : found->second)
+                            image->setImageFromMem(cached->data(), cached->size());
+                    auto key = config.backend + "\n" + config.session + "\n" + job.path;
+                    artworkCache[key] = std::move(cached);
+                    artworkLRU.push_back(key);
+                    while (artworkLRU.size() > 64) {
+                        artworkCache.erase(artworkLRU.front());
+                        artworkLRU.pop_front();
+                    }
+                }
+                continue;
+            }
             if (job.type == "settings" || job.type == "qr_start" || job.type == "qr_status") {
                 if (job.type == "qr_status") qrPending = false;
                 if (result.contains("error")) {
@@ -927,6 +992,13 @@ class Library {
                                 result.value("copyright", std::string{}));
                 if (lines.empty()) lyric->setText("No synchronized lyrics available");
                 renderState();
+            }
+        }
+        if (!artworkPending && !artworkQueue.empty()) {
+            auto path = artworkQueue.front();
+            if (net.submit({"artwork", path, {}, generation})) {
+                artworkPending = true;
+                artworkQueue.pop_front();
             }
         }
         auto current = Clock::now();

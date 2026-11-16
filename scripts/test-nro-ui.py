@@ -12,13 +12,26 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import struct
+import zlib
+from urllib.parse import parse_qs,urlsplit
+
+def thumbnail():
+    def chunk(kind,data):return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data))
+    raw=b''.join(b'\x00'+bytes(value for x in range(64) for value in (50+x*3,35+y*2,155)) for y in range(64))
+    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',64,64,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
 
 class Backend(http.server.BaseHTTPRequestHandler):
     def log_message(self,*args):pass
     def do_GET(self):
+        if self.path.startswith('/v1/artwork/'):
+            raw=thumbnail();self.send_response(200);self.send_header('Content-Type','image/png');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path=='/auth/me':payload={'user':{'username':'demo','apple_linked':True},'csrf':'synthetic-csrf'}
         elif self.path.startswith('/v1/catalog/search?'):
-            payload={'items':[{'id':str(100+i),'type':'albums','title':'Album '+str(i+1),'artist':'Artist'} for i in range(12)],'next_offset':12}
+            term=parse_qs(urlsplit(self.path).query).get('term',[''])[0]
+            payload={'items':[{'id':str(100+i),'type':'albums' if term=='preview' or i%3==0 else 'songs',
+                'title':('A very long album title that should remain readable beside its cover without overlapping the duration column' if term=='long' else 'Track '+str(i+1)),
+                'artist':'Artist name','duration_ms':215000,'artwork_path':'/v1/artwork/songs/'+str(100+i)} for i in range(12)] if term!='empty' else [],'next_offset':12}
         elif self.path.startswith('/v1/catalog/albums/') and self.path.endswith('/tracks'):payload={'items':[]}
         else:self.send_error(404);return
         raw=json.dumps(payload).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)

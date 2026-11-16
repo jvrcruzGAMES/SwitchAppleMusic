@@ -13,6 +13,7 @@ KINDS = {"songs": "library-songs", "albums": "library-albums", "playlists": "lib
 def normalize(resource):
     a = resource.get("attributes", {})
     return {"id": resource["id"], "type": resource["type"],
+            "artwork_path": "/v1/artwork/"+resource["type"]+"/"+resource["id"] if a.get("artwork",{}).get("url") else "",
             "title": a.get("name", "Untitled"), "artist": a.get("artistName", ""),
             "album": a.get("albumName", ""), "duration_ms": a.get("durationInMillis", 0),
             "catalog_id": a.get("playParams", {}).get("catalogId", ""),

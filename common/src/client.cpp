@@ -65,7 +65,7 @@ static size_t collect(char* p, size_t a, size_t b, void* data) {
     if (out.size()+n > 2*1024*1024) return 0;
     out.append(p,n); return n;
 }
-static std::string request(const Config& c,const std::string& path,void* out,curl_write_callback write,long timeout,const Json* body=nullptr,const std::string& csrf="") {
+static std::string request(const Config& c,const std::string& path,void* out,curl_write_callback write,long timeout,const Json* body=nullptr,const std::string& csrf="",const std::function<bool()>& cancel={}) {
     if(path.empty()||path[0]!='/'||path.rfind("//",0)==0) throw std::runtime_error("Invalid API path");
     std::unique_ptr<CURL,decltype(&curl_easy_cleanup)> h(curl_easy_init(),curl_easy_cleanup);
     if(!h) throw std::runtime_error("HTTP allocation failed");
@@ -83,6 +83,12 @@ static std::string request(const Config& c,const std::string& path,void* out,cur
     curl_easy_setopt(h.get(),CURLOPT_TIMEOUT,timeout);
     curl_easy_setopt(h.get(),CURLOPT_NOSIGNAL,1L);
     curl_easy_setopt(h.get(),CURLOPT_FOLLOWLOCATION,0L);
+    if(cancel){
+        curl_easy_setopt(h.get(),CURLOPT_XFERINFOFUNCTION,+[](void* context,curl_off_t,curl_off_t,curl_off_t,curl_off_t)->int{
+            try{return (*static_cast<const std::function<bool()>*>(context))()?1:0;}catch(...){return 1;}
+        });
+        curl_easy_setopt(h.get(),CURLOPT_XFERINFODATA,&cancel);curl_easy_setopt(h.get(),CURLOPT_NOPROGRESS,0L);
+    }
     curl_easy_setopt(h.get(),CURLOPT_WRITEFUNCTION,write);
     curl_easy_setopt(h.get(),CURLOPT_WRITEDATA,out);
 #ifdef __SWITCH__
@@ -103,6 +109,15 @@ static std::string request(const Config& c,const std::string& path,void* out,cur
     std::unique_ptr<curl_slist,decltype(&curl_slist_free_all)> cookieOwner(cookies,curl_slist_free_all);
     for(auto* item=cookies;item;item=item->next){std::string line=item->data;std::string marker="\tswitchmusic_session\t";auto name=line.rfind(marker);if(name!=std::string::npos)return line.substr(name+marker.size());}
     return "";
+}
+std::vector<uint8_t> apiBytes(const Config& c,const std::string& path,size_t limit,const std::function<bool()>& cancel){
+    struct Sink{std::vector<uint8_t> data;size_t limit;};Sink sink{{},limit};sink.data.reserve(std::min<size_t>(limit,128*1024));
+    auto collectBytes=+[](char* bytes,size_t a,size_t b,void* context)->size_t{
+        auto& sink=*static_cast<Sink*>(context);size_t n=a*b;
+        if(n>sink.limit-sink.data.size())return 0;
+        try{sink.data.insert(sink.data.end(),bytes,bytes+n);return n;}catch(...){return 0;}
+    };
+    request(c,path,&sink,collectBytes,8,nullptr,"",cancel);return std::move(sink.data);
 }
 Json signIn(Config c,const std::string& password) {
     c.session.clear();c.validate(false);

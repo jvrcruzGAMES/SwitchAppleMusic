@@ -55,3 +55,10 @@ routes, X/B shortcuts, collection back history, selected-row restoration (includ
 library visibility. Optional PPM screenshots come directly from the OpenGL
 framebuffer. Switch keyboard, touchscreen and physical Joy-Con checks still need
 hardware.
+
+`row.xml` places the order number, a 52-pixel cover view, and the title/artist
+column in that order. Covers are requested as 64-pixel PNGs through the backend
+on the existing network worker. Page changes cancel stale image jobs; texture
+updates happen on the render thread. The 64-entry encoded-image cache is scoped
+to backend/session and cleared at account/guest transitions. Each page owns and
+releases its textures. A music-note placeholder remains when artwork is absent.

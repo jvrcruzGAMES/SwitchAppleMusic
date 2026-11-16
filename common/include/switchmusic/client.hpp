@@ -2,6 +2,8 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <stdexcept>
+#include <vector>
+#include <functional>
 namespace smusic {
 using Json = nlohmann::json;
 struct Config {
@@ -21,6 +23,7 @@ public:
 Json error(const std::string& message);
 std::string encode(const std::string& value);
 Json api(const Config&, const std::string& path);
+std::vector<uint8_t> apiBytes(const Config&, const std::string& path,size_t limit=256*1024,const std::function<bool()>& cancel={});
 Json post(const Config&, const std::string& path, const Json& body);
 Json signIn(Config, const std::string& password);
 void signOut(const Config&);

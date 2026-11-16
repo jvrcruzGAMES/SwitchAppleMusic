@@ -16,6 +16,7 @@ from .settings import Settings
 from .accounts import Accounts
 from .apple import Apple, KINDS, normalize
 from .playback import Playback
+from .artwork import Artwork
 from .lyrics import lyrics
 
 COOKIE='switchmusic_session'
@@ -66,6 +67,7 @@ def create_app(settings=None,transport=None):
             app.state.http=http
             app.state.apple=Apple(s,http)
             app.state.playback=Playback(s,app.state.apple)
+            app.state.artwork=Artwork(http)
             yield
 
     app=FastAPI(title='SwitchMusic',version='0.2.0',lifespan=lifespan,
@@ -257,6 +259,25 @@ def create_app(settings=None,transport=None):
     async def catalog_tracks(kind: str,resource_id: str,offset: int=Query(0,ge=0,le=1000000),access=Depends(catalog_access)):
         if kind not in ('albums','playlists'):raise HTTPException(404,'Unknown track collection')
         return await app.state.apple.catalog_page(kind,valid_id(resource_id),offset)
+
+    @app.get('/v1/artwork/{kind}/{resource_id}')
+    async def artwork(kind: str,resource_id: str,request: Request,size: int=Query(64),format: str=Query('png')):
+        if size not in (64,256) or format not in ('png','rgba4444') or (format=='rgba4444' and size!=256):
+            raise HTTPException(400,'Unsupported artwork variant')
+        resource_id=valid_id(resource_id)
+        if kind in ('songs','albums','playlists'):
+            client=app.state.apple;scope='catalog'
+            path='catalog/'+client.storefront+'/'+kind+'/'+resource_id
+        elif kind in ('library-songs','library-albums','library-playlists'):
+            principal=await current(request);client=apple(principal);await client.user_token()
+            scope=str(principal.user['id']);path='me/library/'+kind.removeprefix('library-')+'/'+resource_id
+        else:raise HTTPException(404,'Unknown artwork resource')
+        async def load():
+            response=await client.get(path);data=response.get('data',[])
+            if not data:raise HTTPException(404,'Artwork resource unavailable')
+            return data[0]
+        data=await app.state.artwork.get((scope,kind,resource_id),load,size,format)
+        return Response(data,media_type='image/png' if format=='png' else 'application/octet-stream')
 
     @app.get('/v1/resolve/{kind}/{resource_id}')
     async def resolve(kind: str,resource_id: str,principal: Principal=Depends(current)):

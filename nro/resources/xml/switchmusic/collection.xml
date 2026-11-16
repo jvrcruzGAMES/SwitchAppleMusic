@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<brls:Box axis="column" width="100%" height="auto">
+    <brls:Label text="BROWSE" fontSize="15" textColor="#FA4566" marginBottom="10"/>
+    <brls:Label id="page/title" text="Music" fontSize="34" textColor="#F4F5F7" marginBottom="10"/>
+    <brls:Label id="page/subtitle" text="Choose a track to play, or open a collection." fontSize="19" textColor="#A9B0BF" marginBottom="24"/>
+    <brls:Box axis="row" alignItems="center" marginBottom="12">
+        <brls:Label id="collection/count" text="0 items" fontSize="16" textColor="#9099AA" marginBottom="10" grow="1"/>
+        <brls:Button id="collection/search" text="Search" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" width="140" style="borderless"/>
+    </brls:Box>
+    <brls:Box id="collection/rows" axis="column" width="100%"/>
+    <brls:Label id="collection/empty" text="Nothing here yet. Try another search or collection." fontSize="20" textColor="#A9B0BF" marginBottom="10"/>
+    <brls:Box id="collection/pages" axis="row" marginTop="16">
+        <brls:Button id="collection/first" text="First page" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" grow="1" style="bordered" marginRight="12"/>
+        <brls:Button id="collection/next" text="Next page" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" grow="1" style="primary"/>
+    </brls:Box>
+</brls:Box>

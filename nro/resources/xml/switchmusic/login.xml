@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<brls:Box axis="column" width="100%" height="auto">
+    <brls:Label text="YOUR MUSIC, CONNECTED" fontSize="15" textColor="#FA4566" marginBottom="10"/>
+    <brls:Label id="page/title" text="Welcome to SwitchMusic" fontSize="34" textColor="#F4F5F7" marginBottom="10"/>
+    <brls:Label id="page/subtitle" text="Enter your server address. Sign in for your library, or explore the catalog as a guest." fontSize="19" textColor="#A9B0BF" marginBottom="24"/>
+    <brls:Box axis="column" width="100%" height="auto" padding="24" backgroundColor="#1C212D" cornerRadius="14" marginBottom="20">
+        <brls:Label text="CONNECTION" fontSize="14" textColor="#9099AA" marginBottom="10"/>
+        <brls:Button id="login/server" text="Server URL" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" textHorizontalAlign="left"/>
+        <brls:Button id="login/username" text="Username" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" textHorizontalAlign="left"/>
+        <brls:Button id="login/password" text="Password" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" textHorizontalAlign="left"/>
+    </brls:Box>
+    <brls:Box axis="row">
+        <brls:Button id="login/submit" text="Sign in" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" grow="1" style="primary" marginRight="16"/>
+        <brls:Button id="login/guest" text="Browse as guest" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" grow="1" style="bordered"/>
+    </brls:Box>
+    <brls:Label text="Apple Music library linking is optional. Use your phone to link it in Settings after signing in." fontSize="17" textColor="#9099AA" marginBottom="10"/>
+</brls:Box>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<brls:Box axis="column" width="100%" height="auto">
+    <brls:Label text="APPLE MUSIC" fontSize="15" textColor="#FA4566" marginBottom="10"/>
+    <brls:Label id="page/title" text="Bring your library along." fontSize="34" textColor="#F4F5F7" marginBottom="10"/>
+    <brls:Label id="page/subtitle" text="Scan the QR code with your phone, then authorize Apple Music on the website." fontSize="19" textColor="#A9B0BF" marginBottom="24"/>
+    <brls:Box axis="row" alignItems="center" backgroundColor="#1C212D" cornerRadius="14" padding="22" marginBottom="16">
+        <SwitchMusicQR id="qr/image" width="340" height="340" shrink="0"/>
+        <brls:Box axis="column" grow="1" minWidth="0" marginLeft="26">
+            <brls:Label text="MATCH THIS CODE" fontSize="14" textColor="#9099AA" marginBottom="10"/>
+            <brls:Label id="qr/code" text="000-000" fontSize="34" textColor="#FA4566" marginBottom="10"/>
+            <brls:Label id="qr/account" text="Sign in as" fontSize="20" textColor="#F4F5F7" marginBottom="10"/>
+            <brls:Label id="qr/timer" text="Expires in 5:00" fontSize="18" textColor="#A9B0BF" marginBottom="10"/>
+            <brls:Label text="Keep this screen open. Your library will connect automatically." fontSize="18" textColor="#A9B0BF" marginBottom="10"/>
+            <brls:Button id="qr/cancel" text="Cancel linking" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" width="240" style="bordered" marginTop="12"/>
+        </brls:Box>
+    </brls:Box>
+</brls:Box>

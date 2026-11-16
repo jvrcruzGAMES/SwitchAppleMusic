@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<brls:Box axis="column" width="100%" height="auto">
+    <brls:Label text="SWITCHMUSIC" fontSize="15" textColor="#FA4566" marginBottom="10"/>
+    <brls:Label id="page/title" text="Just a moment…" fontSize="34" textColor="#F4F5F7" marginBottom="10"/>
+    <brls:Label id="page/subtitle" text="Connecting to your music server." fontSize="19" textColor="#A9B0BF" marginBottom="24"/>
+    <brls:ProgressSpinner id="message/spinner" marginTop="24" marginBottom="24"/>
+    <brls:Button id="message/retry" text="Try again" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" width="260" style="primary"/>
+    <brls:Button id="message/back" text="Back" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" width="260" style="borderless"/>
+</brls:Box>

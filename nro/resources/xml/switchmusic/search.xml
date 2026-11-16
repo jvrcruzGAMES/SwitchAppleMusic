@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<brls:Box axis="column" width="100%" height="auto">
+    <brls:Label text="EXPLORE APPLE MUSIC" fontSize="15" textColor="#FA4566" marginBottom="10"/>
+    <brls:Label id="page/title" text="What do you want to hear?" fontSize="34" textColor="#F4F5F7" marginBottom="10"/>
+    <brls:Label id="page/subtitle" text="Search songs, albums and playlists. No Apple Music sign-in is needed to browse." fontSize="19" textColor="#A9B0BF" marginBottom="24"/>
+    <brls:Button id="search/open" text="Search Apple Music" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" style="primary" width="360"/>
+    <brls:Box axis="column" width="100%" height="auto" padding="28" marginTop="20" cornerRadius="14" backgroundColor="#1C212D">
+        <brls:Label text="YOUR NEXT DISCOVERY" fontSize="14" textColor="#FA4566" marginBottom="10"/>
+        <brls:Label text="An artist you love.&#10;An album you missed.&#10;A song on repeat." fontSize="30" textColor="#F4F5F7" marginBottom="10"/>
+    </brls:Box>
+</brls:Box>

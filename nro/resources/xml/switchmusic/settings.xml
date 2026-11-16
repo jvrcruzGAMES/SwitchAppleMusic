@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<brls:Box axis="column" width="100%" height="auto">
+    <brls:Label text="ACCOUNT" fontSize="15" textColor="#FA4566" marginBottom="10"/>
+    <brls:Label id="page/title" text="Your music, your way." fontSize="34" textColor="#F4F5F7" marginBottom="10"/>
+    <brls:Label id="page/subtitle" text="Manage your server account and Apple Music library connection." fontSize="19" textColor="#A9B0BF" marginBottom="24"/>
+    <brls:Box axis="column" width="100%" height="auto" padding="26" backgroundColor="#1C212D" cornerRadius="14" marginBottom="20">
+        <brls:Label id="settings/server" text="Server" fontSize="18" textColor="#A9B0BF" marginBottom="10"/>
+        <brls:Label id="settings/user" text="Account" fontSize="23" textColor="#F4F5F7" marginBottom="10"/>
+        <brls:Label id="settings/apple" text="Apple Music library not linked" fontSize="20" textColor="#FA4566" marginBottom="10"/>
+        <brls:Button id="settings/link" text="Link Apple Music with QR code" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" style="primary" marginTop="16"/>
+        <brls:Label text="Scan with your phone and sign in using the same server account." fontSize="17" textColor="#A9B0BF" marginBottom="10"/>
+    </brls:Box>
+    <brls:Button id="settings/browse" text="Browse music" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" style="bordered"/>
+    <brls:Button id="settings/logout" text="Sign out" height="54" shrink="0" marginBottom="12" cornerRadius="10" fontSize="20" style="borderless"/>
+</brls:Box>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<brls:Box axis="row" focusable="true" width="100%" height="80" shrink="0" padding="14" marginBottom="6" backgroundColor="#1C212D" cornerRadius="10" highlightCornerRadius="10" alignItems="center">
+    <brls:Label id="row/index" width="38" fontSize="17" textColor="#9099AA" singleLine="true" shrink="0"/>
+    <brls:Box axis="column" grow="1" minWidth="0" marginRight="18">
+        <brls:Label id="row/title" fontSize="22" textColor="#F4F5F7" singleLine="true" width="100%"/>
+        <brls:Label id="row/detail" fontSize="16" textColor="#A9B0BF" singleLine="true" marginTop="5" width="100%"/>
+    </brls:Box>
+    <brls:Label id="row/type" fontSize="15" textColor="#FA4566" singleLine="true" shrink="0" width="106" horizontalAlign="right"/>
+</brls:Box>

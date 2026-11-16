@@ -34,7 +34,7 @@ python3 scripts/test-audio-ffmpeg.py
 python3 scripts/package-audio-ffmpeg.py
 ```
 
-Required host tools: Python 3.12+, patch, make, a C compiler, and a full host `ffmpeg` executable for generating fixtures. Switch builds require devkitA64 and libnx; the budget probe additionally links the existing Switch curl/zlib packages. The build installs into `build-ffmpeg/switch`, leaving `/opt/devkitpro` untouched. Source downloads and the upstream Switch patch are SHA-256 verified; build metadata records the exact flags and patch fingerprint.
+Required host tools: Python 3.11+, patch, make, a C compiler, and a full host `ffmpeg` executable for generating fixtures. Switch builds require devkitA64 and libnx; the budget probe additionally links the existing Switch curl/zlib packages. The build installs into `build-ffmpeg/switch`, leaving `/opt/devkitpro` untouched. Source downloads and the upstream Switch patch are SHA-256 verified; build metadata records the exact flags and patch fingerprint.
 
 The host decoder tests compare PCM against a full reference FFmpeg, allowing at most one 16-bit quantization step because reference FFmpeg versions can differ. Tests cover progressive AAC at 44.1/48 kHz, fragmented-MP4 AAC, 16-bit ALAC, 24-bit/192-kHz ALAC, fragmented ALAC, and AAC/ALAC fMP4 HLS playlists. A host allocation guard caps tracked FFmpeg allocations at 8 MiB. In the synthetic fixtures the highest tracked allocation peak was approximately 1.03 MB; these short fixtures are not a worst-case workload or a Switch heap measurement. The tests also reject AC-3 and verify AAC transform sizes, including 960/120-sample variants.
 

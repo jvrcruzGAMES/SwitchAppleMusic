@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import tarfile
@@ -17,6 +17,28 @@ PORT_PATCH_SHA256='1792380b992e3554a4abcddf0d7b395bfd8c118ac7c6e38c8f2fb0d39753a
 
 def run(args,**kwargs):
     subprocess.run([str(a) for a in args],check=True,**kwargs)
+
+def extract_source(archive, destination):
+    """Extract verified source without depending on Python 3.12's tar filters."""
+    root = destination.resolve()
+    with tarfile.open(archive) as source:
+        for member in source:
+            relative = PurePosixPath(member.name)
+            if relative.is_absolute() or '..' in relative.parts:
+                raise ValueError('Unsafe path in FFmpeg source archive')
+            target = root.joinpath(*relative.parts)
+            if not target.resolve().is_relative_to(root):
+                raise ValueError('Source archive path escapes its destination')
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with source.extractfile(member) as input_file, target.open('wb') as output_file:
+                    shutil.copyfileobj(input_file, output_file)
+                target.chmod(member.mode & 0o777)
+            else:
+                raise ValueError('Links and special files are not allowed in FFmpeg source archives')
+
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -39,8 +61,7 @@ def main():
     if not source.exists():
         temporary=work/f'extract-{fingerprint[:12]}'
         temporary.mkdir(exist_ok=True)
-        with tarfile.open(archive) as t:
-            t.extractall(temporary,filter='data')
+        extract_source(archive, temporary)
         extracted=temporary/f'ffmpeg-{VERSION}'
         for patch in patches:
             with patch.open('rb') as data:run(['patch','-p1'],cwd=extracted,stdin=data)

@@ -23,6 +23,7 @@ public:
 Json error(const std::string& message);
 std::string encode(const std::string& value);
 Json api(const Config&, const std::string& path);
+Json post(const Config&, const std::string& path, const Json& body);
 Json signIn(Config, const std::string& password);
 void signOut(const Config&);
 Json control(const Config&, Json request);

@@ -7,6 +7,7 @@ import base64
 import binascii
 import secrets
 import re
+import qrcode
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -33,9 +34,14 @@ class AccountUpdate(Body):
 class PasswordChange(Body):
     old_password: str=Field(min_length=1,max_length=256)
     new_password: str=Field(min_length=12,max_length=256)
-class AppleCallback(Body):
+class AppleStart(Body):
+    qr_code: str|None=Field(None,min_length=43,max_length=43,pattern=r'^[A-Za-z0-9_-]+$')
+class AppleCallback(AppleStart):
     state: str=Field(min_length=1,max_length=256)
     music_user_token: str=Field(min_length=1,max_length=32768)
+
+class QRCode(Body):
+    code: str=Field(min_length=43,max_length=43,pattern=r'^[A-Za-z0-9_-]+$')
 
 @dataclass
 class Principal:
@@ -169,23 +175,55 @@ def create_app(settings=None,transport=None):
     async def admin_unlink(user_id: int,principal: Principal=Depends(admin)):
         app.state.accounts.unlink(user_id)
 
+    def browser_session(principal):
+        if not principal.session_token:raise HTTPException(400,'Sign in with a session to use Apple Music QR linking')
+
+    @app.post('/auth/apple/qr/start')
+    async def start_qr(principal: Principal=Depends(current)):
+        browser_session(principal)
+        origin=urlsplit(app.state.settings.public_url)
+        if origin.scheme not in ('http','https') or not origin.netloc or origin.username or origin.password or origin.path not in ('','/') or origin.query or origin.fragment or len(origin.netloc)>300:
+            raise HTTPException(503,'Set PUBLIC_URL to your phone-accessible server origin')
+        code,confirmation=app.state.accounts.start_qr(principal.user['id'],principal.session_token)
+        url=app.state.settings.public_url.rstrip('/')+'/#apple-qr='+code
+        def matrix():
+            image=qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,border=4)
+            image.add_data(url);image.make(fit=True)
+            return [''.join('1' if cell else '0' for cell in row) for row in image.get_matrix()]
+        return {'code':code,'confirmation':confirmation,'url':url,'expires_in':300,'matrix':await asyncio.to_thread(matrix)}
+
+    @app.post('/auth/apple/qr/details')
+    async def qr_details(body: QRCode,principal: Principal=Depends(current)):
+        browser_session(principal)
+        return app.state.accounts.qr(principal.user['id'],body.code)
+
+    @app.post('/auth/apple/qr/status')
+    async def qr_status(body: QRCode,principal: Principal=Depends(current)):
+        browser_session(principal)
+        return app.state.accounts.qr(principal.user['id'],body.code,principal.session_token,'status')
+
+    @app.post('/auth/apple/qr/cancel',status_code=204)
+    async def qr_cancel(body: QRCode,principal: Principal=Depends(current)):
+        browser_session(principal)
+        app.state.accounts.qr(principal.user['id'],body.code,principal.session_token,'cancel')
+
     @app.post('/auth/apple/start')
-    async def start_apple(principal: Principal=Depends(current)):
+    async def start_apple(body: AppleStart|None=None,principal: Principal=Depends(current)):
         if not principal.session_token:raise HTTPException(400,'Sign in on the website to link Apple Music')
-        return {'state':app.state.accounts.start_link(principal.user['id'],principal.session_token),
+        return {'state':app.state.accounts.start_link(principal.user['id'],principal.session_token,body.qr_code if body else None),
                 'developer_token':app.state.apple.developer_token()}
 
     @app.post('/auth/apple/callback')
     async def finish_apple(body: AppleCallback,principal: Principal=Depends(current)):
         if not principal.session_token:raise HTTPException(400,'Sign in on the website to link Apple Music')
-        app.state.accounts.consume_link(principal.user['id'],principal.session_token,body.state)
+        app.state.accounts.consume_link(principal.user['id'],principal.session_token,body.state,body.qr_code)
         if '\r' in body.music_user_token or '\n' in body.music_user_token:raise HTTPException(422,'Invalid Apple authorization')
         linked=Apple(app.state.settings,app.state.http,body.music_user_token)
         payload=await linked.get('me/storefront')
         data=payload.get('data',[])
         storefront=data[0].get('id','') if data else ''
         if not re.fullmatch('[a-z]{2}',storefront):raise HTTPException(502,'Apple did not return a valid storefront')
-        app.state.accounts.link(principal.user['id'],body.music_user_token,storefront)
+        app.state.accounts.link(principal.user['id'],body.music_user_token,storefront,body.qr_code)
         return {'user':app.state.accounts.public(app.state.accounts.get(principal.user['id']))}
 
     @app.delete('/auth/apple',status_code=204)

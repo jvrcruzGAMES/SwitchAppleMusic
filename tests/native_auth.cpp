@@ -24,6 +24,7 @@ int main(int argc,char** argv){
     config.save(path);auto restored=Config::load(true,path);assert(restored.session==config.session);
     std::ifstream file(path);auto saved=Json::parse(file);assert(!saved.contains("password")&&!saved.contains("ca_bundle"));
     assert(api(restored,"/auth/me").at("user").at("username")=="admin");
+    assert(post(restored,"/auth/apple/qr/start",Json::object()).at("confirmation")=="123-456");
     signOut(restored);denied=false;try{api(restored,"/auth/me");}catch(const HttpError& e){denied=e.status==401;}assert(denied);
     config.session=signIn(config,password).at("session");config.save(path);
     api(config,"/test/expire");denied=false;try{api(config,"/auth/me");}catch(const HttpError& e){denied=e.status==401;}assert(denied);

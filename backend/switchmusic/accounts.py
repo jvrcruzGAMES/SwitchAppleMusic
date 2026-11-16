@@ -46,10 +46,17 @@ class Accounts:
                 CREATE TABLE IF NOT EXISTS sessions (
                     hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                     csrf TEXT NOT NULL, expires INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS apple_qr (
+                    hash TEXT PRIMARY KEY, session_hash TEXT NOT NULL REFERENCES sessions(hash) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    expires INTEGER NOT NULL, confirmation TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0,
+                    last_poll REAL NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS apple_flows (
                     hash TEXT PRIMARY KEY, session_hash TEXT NOT NULL REFERENCES sessions(hash) ON DELETE CASCADE,
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
             ''')
+            if 'qr_hash' not in [row['name'] for row in db.execute('PRAGMA table_info(apple_flows)')]:
+                db.execute('ALTER TABLE apple_flows ADD COLUMN qr_hash TEXT REFERENCES apple_qr(hash) ON DELETE CASCADE')
             if not db.execute("SELECT 1 FROM users WHERE username='admin'").fetchone():
                 password_valid(settings.admin_password)
                 db.execute('INSERT INTO users(username,password_hash,admin) VALUES(?,?,1)',
@@ -143,28 +150,71 @@ class Accounts:
             db.execute('UPDATE users SET password_hash=? WHERE id=?',(PASSWORDS.hash(password),user_id))
             db.execute('DELETE FROM sessions WHERE user_id=?',(user_id,))
 
-    def start_link(self,user_id,session_token):
+    def start_link(self,user_id,session_token,qr_code=None):
         state=secrets.token_urlsafe(32)
         with self.db() as db:
             db.execute('DELETE FROM apple_flows WHERE expires<?',(int(time.time()),))
             db.execute('DELETE FROM apple_flows WHERE user_id=?',(user_id,))
-            db.execute('INSERT INTO apple_flows VALUES(?,?,?,?)',(digest(state),digest(session_token),user_id,int(time.time())+600))
+            if qr_code:self._valid_qr(db,user_id,qr_code,pending=True)
+            db.execute('INSERT INTO apple_flows(hash,session_hash,user_id,expires,qr_hash) VALUES(?,?,?,?,?)',
+                (digest(state),digest(session_token),user_id,int(time.time())+600,digest(qr_code) if qr_code else None))
         return state
 
-    def consume_link(self,user_id,session_token,state):
+    def consume_link(self,user_id,session_token,state,qr_code=None):
         with self.db() as db:
-            row=db.execute('DELETE FROM apple_flows WHERE hash=? AND user_id=? AND session_hash=? AND expires>? RETURNING hash',
-                (digest(state),user_id,digest(session_token),int(time.time()))).fetchone()
+            if qr_code:self._valid_qr(db,user_id,qr_code,pending=True)
+            row=db.execute('DELETE FROM apple_flows WHERE hash=? AND user_id=? AND session_hash=? AND expires>? AND qr_hash IS ? RETURNING hash',
+                (digest(state),user_id,digest(session_token),int(time.time()),digest(qr_code) if qr_code else None)).fetchone()
         if not row:raise HTTPException(400,'Linking request expired or was already used; start again')
 
-    def link(self,user_id,token,storefront):
-        with self.db() as db:db.execute('UPDATE users SET apple_token=?,storefront=? WHERE id=?',
-            (self.cipher.encrypt(token.encode()),storefront,user_id))
+    def link(self,user_id,token,storefront,qr_code=None):
+        with self.db() as db:
+            if qr_code:self._valid_qr(db,user_id,qr_code,pending=True)
+            db.execute('UPDATE users SET apple_token=?,storefront=? WHERE id=?',
+                (self.cipher.encrypt(token.encode()),storefront,user_id))
+            if qr_code:db.execute('UPDATE apple_qr SET completed=1 WHERE hash=?',(digest(qr_code),))
 
     def unlink(self,user_id):
         with self.db() as db:
             db.execute('UPDATE users SET apple_token=NULL,storefront=NULL WHERE id=?',(user_id,))
             db.execute('DELETE FROM apple_flows WHERE user_id=?',(user_id,))
+            db.execute('DELETE FROM apple_qr WHERE user_id=?',(user_id,))
 
     def apple_token(self,user):
         return self.cipher.decrypt(user['apple_token']).decode() if user['apple_token'] else None
+
+    def start_qr(self,user_id,session_token):
+        code=secrets.token_urlsafe(32);confirmation=f'{secrets.randbelow(1000000):06d}'
+        with self.db() as db:
+            db.execute('DELETE FROM apple_qr WHERE expires<=?',(int(time.time()),))
+            db.execute('DELETE FROM apple_qr WHERE session_hash=?',(digest(session_token),))
+            if db.execute('SELECT count(*) FROM apple_qr').fetchone()[0]>=256:
+                raise HTTPException(503,'Too many active QR requests; try again later')
+            db.execute('INSERT INTO apple_qr(hash,session_hash,user_id,expires,confirmation) VALUES(?,?,?,?,?)',
+                (digest(code),digest(session_token),user_id,int(time.time())+300,confirmation))
+        return code,confirmation[:3]+'-'+confirmation[3:]
+
+    def _valid_qr(self,db,user_id,code,pending=False):
+        row=db.execute('SELECT q.* FROM apple_qr q JOIN sessions s ON s.hash=q.session_hash WHERE q.hash=? AND q.expires>? AND s.expires>?',
+            (digest(code),int(time.time()),int(time.time()))).fetchone()
+        if not row:raise HTTPException(410,'QR code expired or cancelled; request another on your Switch')
+        if row['user_id']!=user_id:raise HTTPException(403,'Sign in on this website with the same backend account as your Switch')
+        if pending and row['completed']:raise HTTPException(409,'Apple Music QR request already completed')
+        return row
+
+    def qr(self,user_id,code,session_token=None,action='details'):
+        with self.db() as db:
+            row=self._valid_qr(db,user_id,code)
+            if action in ('status','cancel') and row['session_hash']!=digest(session_token or ''):
+                raise HTTPException(403,'This QR request belongs to another Switch session')
+            if action=='cancel':db.execute('DELETE FROM apple_qr WHERE hash=?',(row['hash'],));return
+            if action=='status':
+                now=time.time()
+                if not row['completed'] and now-row['last_poll']<2:raise HTTPException(429,'Wait before checking this QR request again')
+                db.execute('UPDATE apple_qr SET last_poll=? WHERE hash=?',(now,row['hash']))
+                if row['completed']:
+                    db.execute('DELETE FROM apple_qr WHERE hash=?',(row['hash'],))
+                    return {'status':'linked','user':self.public(self.get(user_id))}
+                return {'status':'pending'}
+            return {'confirmation':row['confirmation'][:3]+'-'+row['confirmation'][3:],
+                    'expires_in':max(0,row['expires']-int(time.time())), 'username':self.get(user_id)['username']}

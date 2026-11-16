@@ -24,6 +24,8 @@ class SessionServer(http.server.BaseHTTPRequestHandler):
             if body!={'username':'admin','password':'Synthetic-password-12345'}:return self.reply(401,{'detail':'Invalid username or password'})
             self.server.session='a'*43
             return self.reply(200,{'user':{'username':'admin'},'csrf':'csrf-value'},'switchmusic_session='+self.server.session+'; HttpOnly; Path=/; SameSite=Strict')
+        if self.path=='/auth/apple/qr/start' and self.authorized() and self.headers.get('X-CSRF-Token')=='csrf-value':
+            return self.reply(200,{'confirmation':'123-456'})
         if self.path=='/auth/logout' and self.authorized() and self.headers.get('X-CSRF-Token')=='csrf-value':
             self.server.session=None;return self.reply(204,None)
         self.reply(403,{'detail':'Denied'})

@@ -63,6 +63,7 @@ All `/v1/` routes require an active backend account: a signed-in session cookie 
 | --- | --- |
 | `POST /auth/login`, `GET /auth/me`, `POST /auth/logout` | Browser sign-in, user/CSRF state and sign-out |
 | `POST /auth/password` | Change own password and revoke sessions |
+| `POST /auth/apple/qr/{start,details,status,cancel}` | Session-bound Apple library QR linking; all require authentication and CSRF |
 | `POST /auth/apple/start`, `POST /auth/apple/callback`, `DELETE /auth/apple` | Session-bound MusicKit linking and unlinking |
 | `GET/POST /admin/accounts`, `PATCH/DELETE /admin/accounts/{id}` | Admin-only account management |
 | `DELETE /admin/accounts/{id}/apple` | Admin removes a library link |
@@ -81,6 +82,10 @@ Resources are normalized to IDs, resource type, title, artist, album, duration, 
 ## Secrets and hosting
 
 The server retains the Media Services private key and signs one-hour developer JWTs. Each account links its own library using official MusicKit JS on the website. A ten-minute, single-use nonce binds the callback to the initiating user and browser session. The backend verifies the resulting token with Apple's `me/storefront` endpoint before storing it. Catalog requests use the developer JWT; only that user's `me/` requests receive their Music User Token. Tokens are Fernet-encrypted in SQLite using a separate mode-0600 key in `DATA_DIR`. Persist and back up both files together. Relink after Apple revokes or expires authorization.
+
+The NRO Settings page requests an Apple Music QR code from the backend. The backend encodes its `PUBLIC_URL` plus a random 256-bit code in a URL fragment, returning a binary QR matrix with a four-module quiet zone and a display-only confirmation number. The NRO renders the matrix directly without an image decoder and polls every three seconds. This functionality runs only in the NRO; it does not add Python, QR generation, or polling to the sysmodule.
+
+QR requests last five minutes and are bound to the initiating user and backend session. Phone users must sign into the existing website as that same backend user. MusicKit is prepared before the authorization button becomes enabled, so `authorize()` runs directly in the phone's click gesture. The existing callback accepts an optional QR binding; bound nonces cannot be submitted as ordinary web authorizations. Cancellation, replacement, unlinking, or session revocation cascades to bound nonces. The token-storage transaction checks expiry/binding again after Apple's response and atomically marks the QR complete. Only the initiating Switch session can consume the single-use completion result; it receives public library-link status, never a new backend session, Music User Token or developer JWT. Ordinary website authorization remains unchanged. The QR capability is hashed in SQLite and removed from the phone's address bar before MusicKit loads. All QR API calls use POST bodies and existing session/CSRF protection.
 
 Only the reserved admin can create, manage and delete accounts. Its password is bootstrapped from `ADMIN_PASSWORD` on the first start; later starts preserve the database password. Passwords use Argon2; random browser session tokens and linking nonces are stored as SHA-256 hashes. Failed logins are throttled. Disabled/deleted accounts and revoked sessions are rejected on subsequent requests. Password reset/change revokes browser sessions. No Apple password or 2FA code is collected. Wrapper authentication is administered separately on the host: playback uses its subscribed account, independently of each user's library token. Catalog-only backend accounts need no Apple link.
 

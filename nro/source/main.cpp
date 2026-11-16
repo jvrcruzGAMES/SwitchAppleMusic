@@ -8,10 +8,30 @@
 #include <condition_variable>
 #include <chrono>
 #include <sys/stat.h>
+#include <cmath>
 using namespace smusic;
 using Clock=std::chrono::steady_clock;
 static std::string pageBase(std::string path){auto offset=path.find("&offset=");if(offset==std::string::npos)offset=path.find("?offset=");if(offset!=std::string::npos)path.resize(offset);return path;}
 static std::string withOffset(const std::string& path,int offset){return pageBase(path)+(pageBase(path).find('?')==std::string::npos?"?":"&")+"offset="+std::to_string(offset);}
+class QRView:public brls::Box {
+    std::vector<std::string> rows;
+public:
+    explicit QRView(const Json& matrix):brls::Box(brls::Axis::COLUMN){
+        if(!matrix.is_array()||matrix.size()<29||matrix.size()>185)throw std::runtime_error("Invalid server QR matrix");
+        for(const auto& value:matrix){
+            if(!value.is_string())throw std::runtime_error("Invalid server QR row");auto row=value.get<std::string>();
+            if(row.size()!=matrix.size()||row.find_first_not_of("01")!=std::string::npos)throw std::runtime_error("Invalid server QR row");rows.push_back(std::move(row));
+        }
+        setWidth(340);setHeight(340);setMarginBottom(12);
+    }
+    void draw(NVGcontext* vg,float x,float y,float width,float height,brls::Style,brls::FrameContext*) override{
+        float cell=std::floor(std::min(width,height)/rows.size());if(cell<1)return;
+        float left=std::round(x+(width-cell*rows.size())/2),top=std::round(y+(height-cell*rows.size())/2);
+        nvgSave(vg);nvgShapeAntiAlias(vg,0);nvgBeginPath(vg);nvgRect(vg,left,top,cell*rows.size(),cell*rows.size());nvgFillColor(vg,nvgRGB(255,255,255));nvgFill(vg);
+        nvgBeginPath(vg);for(size_t row=0;row<rows.size();++row)for(size_t col=0;col<rows.size();++col)if(rows[row][col]=='1')nvgRect(vg,left+col*cell,top+row*cell,cell,cell);
+        nvgFillColor(vg,nvgRGB(0,0,0));nvgFill(vg);nvgRestore(vg);
+    }
+};
 struct Job {std::string type,path;Json request;unsigned generation=0;Config credentials{};};
 struct Done {Job job;Json result;};
 class Network {
@@ -22,11 +42,12 @@ public:
     ~Network() {{std::lock_guard guard(mutex);stopped=true;pending.clear();}cv.notify_all();worker.join();}
     bool submit(Job job) {std::lock_guard guard(mutex);if(pending.size()>=8)return false;pending.push_back(std::move(job));cv.notify_one();return true;}
     std::deque<Done> drain(){std::lock_guard guard(mutex);std::deque<Done> out;out.swap(finished);return out;}
-    void configure(Config c){std::lock_guard guard(mutex);config=std::move(c);pending.erase(std::remove_if(pending.begin(),pending.end(),[](const Job& job){return job.type!="logout";}),pending.end());finished.clear();}
-    void run(){while(true){Job job;Config active;{std::unique_lock guard(mutex);cv.wait(guard,[&]{return stopped||!pending.empty();});if(stopped)return;job=std::move(pending.front());pending.pop_front();active=job.type=="logout"?job.credentials:config;}
+    void configure(Config c){std::lock_guard guard(mutex);config=std::move(c);pending.erase(std::remove_if(pending.begin(),pending.end(),[](const Job& job){return job.type!="logout"&&job.type!="qr_cancel";}),pending.end());finished.clear();}
+    void run(){while(true){Job job;Config active;{std::unique_lock guard(mutex);cv.wait(guard,[&]{return stopped||!pending.empty();});if(stopped)return;job=std::move(pending.front());pending.pop_front();active=(job.type=="logout"||job.type=="qr_cancel")?job.credentials:config;}
         Json result;try{
             if(job.type=="login")result=signIn(active,job.request.at("password"));
             else if(job.type=="logout"){signOut(active);result=Json::object();}
+            else if(job.type.rfind("qr_",0)==0)result=post(active,job.path,job.request);
             else result=job.path.empty()?control(active,job.request):api(active,job.path);
             if(job.type=="login"||job.type=="auth"){
                 if(!result.is_object()||!result.contains("user")||!result["user"].is_object()||
@@ -43,6 +64,7 @@ static std::string timeText(double seconds){int s=std::max(0,int(seconds));retur
 class Library {
     Network& net;Config config;std::string password;bool loggedIn=false,authPending=false,checking=false;Clock::time_point lastAuth{};brls::Box* libraryMenu; brls::AppletFrame* frame; brls::ScrollingFrame* scroll;brls::Box* body;
     brls::Label *notice,*track=nullptr,*progress=nullptr,*lyric=nullptr,*nearby=nullptr,*credit=nullptr;
+    Json currentUser;bool inSettings=false,qrActive=false,qrPending=false;std::string qrCode;Clock::time_point qrUntil{},lastQR{};brls::Label* qrTimer=nullptr;
     Json state,items=Json::array(),lines=Json::array();std::string currentPath,kind,lyricId,continuation;
     brls::Button* navigationFocus=nullptr;std::function<void()> navigation;
     unsigned generation=0,authGeneration=0;bool now=false,polling=false;Clock::time_point lastPoll{};
@@ -51,14 +73,14 @@ class Library {
         b->registerClickAction([this,fn](brls::View*){navigation=fn;return true;});box->addView(b);return b;
     }
     brls::Label* label(const std::string& text,float size=24){auto* l=new brls::Label();l->setText(text);l->setFontSize(size);l->setMarginBottom(16);body->addView(l);return l;}
-    void clear(){brls::Application::giveFocus(navigationFocus);body->clearViews();track=progress=lyric=nearby=credit=nullptr;}
+    void clear(){brls::Application::giveFocus(navigationFocus);body->clearViews();track=progress=lyric=nearby=credit=nullptr;qrTimer=nullptr;}
     void focus(){brls::Application::giveFocus(body);scroll->setContentOffsetY(0,false);}
     void command(Json j){if(!net.submit({"command","",std::move(j),generation}))notice->setText("Network queue busy; try again");}
 public:
     explicit Library(Network& n):net(n) {
         auto* root=new brls::Box(brls::Axis::COLUMN);root->setPadding(20);
         auto* account=new brls::Box(brls::Axis::ROW);account->setHeight(60);
-        navigationFocus=button(account,"Account",[this]{if(loggedIn)logout();else loginScreen();});root->addView(account);
+        navigationFocus=button(account,"Account",[this]{if(loggedIn)settings();else loginScreen();});root->addView(account);
         auto* menu=new brls::Box(brls::Axis::ROW);menu->setHeight(70);libraryMenu=menu;
         for(auto k:{"songs","albums","playlists"}){auto* b=button(menu,k,[this,k]{browse("/v1/library/"+std::string(k),k);});if(!navigationFocus)navigationFocus=b;}
         button(menu,"Search",[this]{if(!loggedIn)return;brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});
@@ -82,6 +104,7 @@ public:
         if(R_SUCCEEDED(rc)){value=text.data();loginScreen();}
     }
     void loginScreen(const std::string& message=""){
+        endQR();inSettings=false;
         loggedIn=false;checking=false;authPending=false;polling=false;now=false;++generation;
         navigationFocus->setText("Account");libraryMenu->setVisibility(brls::Visibility::GONE);clear();
         notice->setText(message.empty()?"Sign in with the account created by your server administrator":message);
@@ -90,7 +113,7 @@ public:
         button(body,"Username: "+(config.username.empty()?std::string("Enter username"):config.username),[this]{keyboard("Username",config.username,32);});
         button(body,password.empty()?"Password: Enter password":"Password: ••••••••",[this]{keyboard("Account password",password,256,true);});
         button(body,"Sign in",[this]{login();});
-        label("Link your Apple Music library on the server website. Catalog playback does not require a library link.",18);focus();
+        label("After signing in, link Apple Music in Settings with a QR code or on the server website. Catalog playback does not require a library link.",18);focus();
     }
     void login(){
         if(authPending)return;
@@ -101,6 +124,7 @@ public:
         password.clear();notice->setText(authPending?"Signing in…":"Network queue busy; try again");
     }
     void logout(){
+        endQR();inSettings=false;
         ++generation;net.configure(config);net.submit({"logout","",{},generation,config});
         config.session.clear();password.clear();
         try{Config::clear();}catch(const std::exception& e){loginScreen(e.what());return;}
@@ -109,14 +133,50 @@ public:
     void authenticated(const Json& result,bool fresh){
         authPending=false;checking=false;
         if(fresh){config.session=result.at("session");try{config.save();}catch(const std::exception& e){config.session.clear();loginScreen(e.what());return;}net.configure(config);}
-        loggedIn=true;navigationFocus->setText("Sign out");lastAuth=Clock::now();libraryMenu->setVisibility(brls::Visibility::VISIBLE);
+        loggedIn=true;currentUser=result.at("user");navigationFocus->setText("Settings");lastAuth=Clock::now();libraryMenu->setVisibility(brls::Visibility::VISIBLE);
         notice->setText("Signed in as "+config.username);
         if(result.at("user").value("apple_linked",false))browse("/v1/library/songs","songs");
-        else{clear();label("Search the Apple Music catalog",30);label("Your Apple Music library is not linked. Link it on the server website to browse personal songs, albums and playlists.",20);button(body,"Search catalog",[this]{brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});focus();}
+        else{clear();label("Search the Apple Music catalog",30);label("Your Apple Music library is not linked. Open Settings to link it with a QR code, or use the server website.",20);button(body,"Settings",[this]{settings();});button(body,"Search catalog",[this]{brls::Application::getPlatform()->getImeManager()->openForText([this](std::string text){if(!text.empty())browse("/v1/catalog/search?term="+encode(text),"catalog");},"Search Apple Music","",200,"");});focus();}
+    }
+    void endQR(){
+        if(!qrCode.empty()&&!config.session.empty())net.submit({"qr_cancel","/auth/apple/qr/cancel",{{"code",qrCode}},generation,config});
+        qrActive=qrPending=false;qrCode.clear();qrTimer=nullptr;
+    }
+    void settings(){
+        if(!loggedIn)return;endQR();inSettings=true;now=false;++generation;clear();label("Loading settings…");focus();
+        if(!net.submit({"settings","/auth/me",{},generation})){showSettings(currentUser,"Network queue busy; try again");}
+    }
+    void showSettings(const Json& user,const std::string& message=""){
+        currentUser=user;clear();notice->setText(message.empty()?"Manage your Apple Music library connection":message);
+        label("Settings",32);label("Server: "+config.backend,18);label("Backend account: "+config.username,18);
+        bool linked=user.value("apple_linked",false);label(linked?"Apple Music library connected":"Apple Music library not linked",24);
+        button(body,linked?"Relink Apple Music with QR code":"Link Apple Music with QR code",[this]{startQR();});
+        label("Scan with your phone and authorize Apple Music on the server website. Sign in there with the same backend account.",18);
+        button(body,"Browse music",[this]{browse("/v1/library/songs","songs");});button(body,"Sign out of backend account",[this]{logout();});focus();
+    }
+    void startQR(){
+        endQR();inSettings=true;now=false;qrActive=true;++generation;clear();label("Requesting Apple Music QR code…",26);
+        button(body,"Cancel",[this]{settings();});focus();
+        if(!net.submit({"qr_start","/auth/apple/qr/start",Json::object(),generation,config})){qrActive=false;showSettings(currentUser,"Network queue busy; try again");}
+    }
+    void showQR(const Json& result){
+        auto code=result.at("code").get<std::string>(),confirmation=result.at("confirmation").get<std::string>();
+        int expires=std::clamp(result.value("expires_in",300),1,300);
+        if(code.size()!=43||code.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")!=std::string::npos||confirmation.size()!=7)
+            throw std::runtime_error("Invalid server QR request");
+        auto* qr=new QRView(result.at("matrix"));qrCode=std::move(code);
+        qrUntil=Clock::now()+std::chrono::seconds(expires);lastQR=Clock::now();
+        clear();notice->setText("Scan this code to link your Apple Music library");label("Apple Music",30);
+        auto* row=new brls::Box(brls::Axis::ROW);row->setHeight(350);row->addView(qr);body->addView(row);
+        auto* instructions=new brls::Box(brls::Axis::COLUMN);instructions->setPadding(20);instructions->setGrow(1);
+        auto add=[&](const std::string& text,float size){auto* item=new brls::Label();item->setText(text);item->setFontSize(size);item->setMarginBottom(16);instructions->addView(item);return item;};
+        add("Match this code on your phone:",22);add(confirmation,36);add("Sign in as "+config.username+" on the website, then authorize Apple Music.",20);
+        qrTimer=add("Expires in 5:00",20);row->addView(instructions);
+        button(body,"Cancel",[this]{settings();});focus();
     }
     void browse(std::string path,std::string type) {
         if(!loggedIn)return;
-        now=false;++generation;currentPath=path;kind=type;clear();label("Loading your library…");focus();
+        endQR();inSettings=false;now=false;++generation;currentPath=path;kind=type;clear();label("Loading your library…");focus();
         if(!net.submit({"page",path,{},generation})){clear();label("Network queue busy");button(body,"Retry",[this]{browse(currentPath,kind);});focus();}
     }
     void showPage(const Json& page) {
@@ -147,7 +207,7 @@ public:
         if(currentPath.find('?')!=std::string::npos){auto base=pageBase(currentPath);auto type=kind;button(body,"First page",[this,base,type]{browse(base,type);});}
         focus();
     }
-    void playing(){if(!loggedIn)return;now=true;++generation;clear();track=label("Nothing playing",30);progress=label("0:00 / 0:00");
+    void playing(){if(!loggedIn)return;endQR();inSettings=false;now=true;++generation;clear();track=label("Nothing playing",30);progress=label("0:00 / 0:00");
         button(body,"Play / Pause",[this]{command({{"op","toggle"}});});
         button(body,"Previous",[this]{command({{"op","previous"}});});button(body,"Next",[this]{command({{"op","next"}});});
         button(body,"Seek −15 seconds",[this]{command({{"op","seek"},{"seconds",std::max(0.0,state.value("position",0.0)-15)}});});
@@ -175,11 +235,28 @@ public:
         for(auto& d:net.drain()) {
             if(d.job.type=="state")polling=false;
             if((d.job.type=="auth"||d.job.type=="login")&&d.job.generation==authGeneration)authPending=false;
-            if(d.job.generation!=generation)continue;
-            if(d.job.type=="logout")continue;
+            if(d.job.generation!=generation){
+                if(d.job.type=="qr_start"&&d.result.contains("code"))net.submit({"qr_cancel","/auth/apple/qr/cancel",{{"code",d.result["code"]}},generation,d.job.credentials});
+                continue;
+            }
+            if(d.job.type=="logout"||d.job.type=="qr_cancel")continue;
             if(d.result.value("http_status",0)==401 && d.job.type!="login"){
                 config.session.clear();password.clear();try{Config::clear();}catch(...){}
                 net.configure(config);loginScreen("Your login expired or was revoked. Please sign in again.");continue;
+            }
+            if(d.job.type=="settings"||d.job.type=="qr_start"||d.job.type=="qr_status"){
+                if(d.job.type=="qr_status")qrPending=false;
+                if(d.result.contains("error")){
+                    if(d.job.type=="qr_status"&&d.result.value("http_status",0)==429)continue;
+                    endQR();showSettings(currentUser,d.result["error"]);
+                }else try{
+                    if(d.job.type=="settings")showSettings(d.result.at("user"));
+                    else if(d.job.type=="qr_start")showQR(d.result);
+                    else if(d.result.value("status",std::string{})=="linked"){
+                        qrActive=qrPending=false;qrCode.clear();showSettings(d.result.at("user"),"Apple Music connected. You can browse your library now.");
+                    }
+                }catch(const std::exception& e){endQR();showSettings(currentUser,e.what());}
+                continue;
             }
             if(d.job.type=="login"||d.job.type=="auth"){
                 authPending=false;
@@ -197,8 +274,16 @@ public:
                 else if(d.job.type=="lyrics"&&lyric&&d.job.path=="/v1/lyrics/"+encode(lyricId)){lines=d.result.value("lines",Json::array());credit->setText(d.result.value("provider",std::string("syncedlyrics"))+"  "+d.result.value("copyright",std::string{}));if(lines.empty())lyric->setText("No synchronized lyrics available");renderState();}
             }
         }
-        auto current=Clock::now();if(loggedIn&&!authPending&&current-lastAuth>std::chrono::seconds(30)){lastAuth=current;authGeneration=generation;authPending=net.submit({"auth","/auth/me",{},generation});}
-        if(loggedIn&&!polling&&current-lastPoll>std::chrono::milliseconds(500)){lastPoll=current;polling=net.submit({"state","",{{"op","state"}},generation});}
+        auto current=Clock::now();
+        if(qrActive&&!qrCode.empty()){
+            if(current>=qrUntil){endQR();showSettings(currentUser,"QR code expired. Request another to continue.");}
+            else{
+                if(qrTimer)qrTimer->setText("Expires in "+timeText(std::chrono::duration<double>(qrUntil-current).count()));
+                if(!qrPending&&current-lastQR>std::chrono::seconds(3)){lastQR=current;qrPending=net.submit({"qr_status","/auth/apple/qr/status",{{"code",qrCode}},generation});}
+            }
+        }
+        if(loggedIn&&!authPending&&current-lastAuth>std::chrono::seconds(30)){lastAuth=current;authGeneration=generation;authPending=net.submit({"auth","/auth/me",{},generation});}
+        if(loggedIn&&!inSettings&&!polling&&current-lastPoll>std::chrono::milliseconds(500)){lastPoll=current;polling=net.submit({"state","",{{"op","state"}},generation});}
     }
 };
 int main(){

@@ -112,6 +112,13 @@ Json signIn(Config c,const std::string& password) {
     auto session=request(c,"/auth/login",&raw,collect,35,&body);
     c.session=session;c.validate();auto result=Json::parse(raw);result["session"]=session;return result;
 }
+Json post(const Config& c,const std::string& path,const Json& body) {
+    auto me=api(c,"/auth/me");std::string raw;
+    request(c,path,&raw,collect,35,&body,me.at("csrf"));
+    if(raw.empty())return Json::object();
+    auto result=Json::parse(raw,nullptr,false);
+    if(result.is_discarded())throw std::runtime_error("Invalid backend JSON");return result;
+}
 void signOut(const Config& c) {
     auto me=api(c,"/auth/me");Json body=Json::object();std::string raw;
     request(c,"/auth/logout",&raw,collect,35,&body,me.at("csrf"));

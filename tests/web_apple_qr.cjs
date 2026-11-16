@@ -1,8 +1,8 @@
 // Browser-flow contract test with fake DOM/MusicKit; no Apple account is contacted.
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync('backend/switchmusic/web/app.js','utf8');
-async function scenario(qr,denied=false){
-  const nodes=new Map(),calls=[],pending=[];let gesture=false,authorized=false,cleared=false;
+async function scenario(qr,denied=false,cachedToken=undefined,cachedAuthorized=false){
+  const nodes=new Map(),calls=[],pending=[];let gesture=false,authorized=false,cleared=false,logoutCalls=0;
   class Element{
     constructor(){this.hidden=false;this.disabled=false;this.textContent='';this.dataset={};this.classList={toggle(){}};}
     addEventListener(){}replaceChildren(){}pause(){}load(){}removeAttribute(){}append(){}setAttribute(){}reset(){}
@@ -10,7 +10,7 @@ async function scenario(qr,denied=false){
   }
   const node=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
   const user={username:'alice',admin:false,apple_linked:false,storefront:'us'};
-  const kit={async unauthorize(){},authorize(){if(qr)assert(gesture,'QR authorization must begin directly in the click gesture');authorized=true;return Promise.resolve('SYNTHETIC_APPLE_TOKEN');}};
+  const kit={isAuthorized:cachedAuthorized,musicUserToken:cachedToken,async unauthorize(){assert.equal(typeof this.musicUserToken,'string');assert(this.musicUserToken&&this.musicUserToken!=='undefined'&&this.musicUserToken!=='null');logoutCalls++;this.isAuthorized=false;this.musicUserToken=undefined;},authorize(){if(qr)assert(gesture,'QR authorization must begin directly in the click gesture');authorized=true;return Promise.resolve('SYNTHETIC_APPLE_TOKEN');}};
   const context={URLSearchParams,queueMicrotask,console,
     location:{hash:qr?'#apple-qr='+'a'.repeat(43):'',pathname:'/',search:''},
     history:{replaceState(){cleared=true;}},
@@ -33,8 +33,11 @@ async function scenario(qr,denied=false){
   if(qr){assert(!node('apple-qr-link').hidden);gesture=true;node('apple-qr-link').click();gesture=false;}
   else node('link-apple').click();
   await Promise.all(pending);for(let i=0;i<3;i++)await new Promise(setImmediate);
+  assert.equal(logoutCalls,cachedAuthorized&&typeof cachedToken==='string'&&cachedToken.trim()&&cachedToken!=='undefined'&&cachedToken!=='null'?1:0);
   assert(authorized);assert(calls.includes('/auth/apple/callback'));
   assert(!calls.some(path=>path.startsWith('/auth/pairing/')));
   if(qr)assert.match(node('apple-qr-instructions').textContent,/Return to your Switch/);
 }
-(async()=>{await scenario(true);await scenario(false);await scenario(true,true);console.log('Apple QR gesture, same-account rejection and ordinary web linking passed');})().catch(error=>{console.error(error);process.exitCode=1;});
+(async()=>{await scenario(true);await scenario(false);await scenario(true,true);
+for(const qr of [true,false]){for(const token of [undefined,'','undefined','null'])await scenario(qr,false,token,true);await scenario(qr,false,'CACHED_APPLE_TOKEN',true);await scenario(qr,false,'CACHED_APPLE_TOKEN',false);}
+console.log('Apple QR gesture, same-account rejection and ordinary web linking passed');})().catch(error=>{console.error(error);process.exitCode=1;});

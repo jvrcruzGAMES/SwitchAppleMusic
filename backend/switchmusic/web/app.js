@@ -17,7 +17,7 @@ async function loadAppleQR(){
     await loadMusicKit();if(!active())return;
     const flow=await api('/auth/apple/start','POST',{qr_code:appleQRCode});if(!active())return;flow.qr_code=appleQRCode;
     await MusicKit.configure({developerToken:flow.developer_token,app:{name:'SwitchMusic',build:'0.2.0'}});if(!active())return;
-    try{await MusicKit.getInstance().unauthorize();}catch{}if(!active())return;
+    try{await clearMusicKitAuthorization(MusicKit.getInstance());}catch{}if(!active())return;
     appleQRDetails=details;preparedAppleFlow=flow;$('apple-qr-link').hidden=false;
   }catch(error){if(active()){$('apple-qr-instructions').textContent=error.message;$('apple-qr-code').textContent='';}}
   finally{if(active())$('link-apple').disabled=false;}
@@ -63,13 +63,17 @@ async function loadAccounts(){
     $('accounts').append(article);
   }
 }
+async function clearMusicKitAuthorization(kit){
+  const token=kit.musicUserToken;
+  if(kit.isAuthorized===true&&typeof token==='string'&&token.trim()&&token!=='undefined'&&token!=='null')await kit.unauthorize();
+}
 function loadMusicKit(){if(!musicKitPromise)musicKitPromise=new Promise((resolve,reject)=>{if(window.MusicKit){resolve();return;}document.addEventListener('musickitloaded',resolve,{once:true});const script=document.createElement('script');script.src='https://js-cdn.music.apple.com/musickit/v3/musickit.js';script.onerror=()=>{musicKitPromise=null;reject(Error('MusicKit could not load. Try again.'));};document.head.append(script);});return musicKitPromise;}
-$('link-apple').onclick=async()=>{const button=$('link-apple'),owner=user;button.disabled=true;message();try{let flow=preparedAppleFlow;preparedAppleFlow=null;let kit;if(flow){kit=MusicKit.getInstance();}else{await loadMusicKit();flow=await api('/auth/apple/start','POST',appleQRDetails?{qr_code:appleQRCode}:undefined);if(appleQRDetails)flow.qr_code=appleQRCode;await MusicKit.configure({developerToken:flow.developer_token,app:{name:'SwitchMusic',build:'0.2.0'}});kit=MusicKit.getInstance();try{await kit.unauthorize();}catch{}}const token=await kit.authorize();if(user!==owner)throw Error('Your account session changed. Start authorization again.');const linked=await api('/auth/apple/callback','POST',{state:flow.state,music_user_token:token,...(flow.qr_code?{qr_code:flow.qr_code}:{})});refreshUser(linked.user);
+$('link-apple').onclick=async()=>{const button=$('link-apple'),owner=user;button.disabled=true;message();try{let flow=preparedAppleFlow;preparedAppleFlow=null;let kit;if(flow){kit=MusicKit.getInstance();}else{await loadMusicKit();flow=await api('/auth/apple/start','POST',appleQRDetails?{qr_code:appleQRCode}:undefined);if(appleQRDetails)flow.qr_code=appleQRCode;await MusicKit.configure({developerToken:flow.developer_token,app:{name:'SwitchMusic',build:'0.2.0'}});kit=MusicKit.getInstance();try{await clearMusicKitAuthorization(kit);}catch{}}const token=await kit.authorize();if(user!==owner)throw Error('Your account session changed. Start authorization again.');const linked=await api('/auth/apple/callback','POST',{state:flow.state,music_user_token:token,...(flow.qr_code?{qr_code:flow.qr_code}:{})});refreshUser(linked.user);
 if(appleQRDetails&&!appleQRCompleted){
   appleQRCompleted=true;appleQRDetails=null;
   $('apple-qr-link').hidden=true;$('apple-qr-instructions').textContent='Apple Music connected. Return to your Switch.';
 }
 message('Apple Music library connected.');}catch(error){message(error.message||'Apple Music authorization was cancelled.');if(appleQRDetails&&!appleQRCompleted)queueMicrotask(()=>loadAppleQR().catch(()=>{}));}finally{button.disabled=false;}};
-$('unlink-apple').onclick=async()=>{try{await api('/auth/apple','DELETE');if(window.MusicKit)try{await MusicKit.getInstance().unauthorize();}catch{}refreshUser((await api('/auth/me')).user);message('Apple Music library unlinked.');}catch(error){message(error.message);}};
+$('unlink-apple').onclick=async()=>{try{await api('/auth/apple','DELETE');if(window.MusicKit)try{await clearMusicKitAuthorization(MusicKit.getInstance());}catch{}refreshUser((await api('/auth/me')).user);message('Apple Music library unlinked.');}catch(error){message(error.message);}};
 $('audio').addEventListener('error',()=>message('Audio could not be loaded. Check your account session and server playback availability.'));
 api('/auth/me').then(signedIn).catch(()=>showLogin());

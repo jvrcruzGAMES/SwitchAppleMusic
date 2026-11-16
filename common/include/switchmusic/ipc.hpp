@@ -6,7 +6,7 @@
 #include <stdexcept>
 
 namespace smusic {
-// Kernel named port, not a TCP endpoint or a deferred SM lookup.
+// SM-registered Horizon service; clients probe availability before lookup.
 inline constexpr char ControlServiceName[] = "smusic";
 inline constexpr unsigned ControlProtocolVersion = 3;
 inline constexpr unsigned ControlCommand = 0;

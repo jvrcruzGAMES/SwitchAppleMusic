@@ -91,26 +91,9 @@ bool process(const std::function<std::string(std::string_view)> &handler) {
 }
 } // namespace
 Result createControlPort(Handle *port) {
-    Result rc = svcManageNamedPort(port, ControlServiceName, MaxControlSessions);
-    if (R_SUCCEEDED(rc))
-        return rc;
-    // Named-port entries can outlive a force-terminated owner. Reclaim only
-    // a proven closed server; never unregister another live instance.
-    Handle probe = INVALID_HANDLE;
-    Result status = svcConnectToNamedPort(&probe, ControlServiceName);
-    if (R_SUCCEEDED(status)) {
-        svcCloseHandle(probe);
-        return rc;
-    }
-    if (R_VALUE(status) == KERNELRESULT(ConnectionRefused)) {
-        Handle unused = INVALID_HANDLE;
-        status = svcManageNamedPort(&unused, ControlServiceName, 0);
-        if (R_FAILED(status))
-            return status;
-    } else if (R_VALUE(status) != KERNELRESULT(NotFound))
-        return rc;
-    *port = INVALID_HANDLE;
-    return svcManageNamedPort(port, ControlServiceName, MaxControlSessions);
+    // SM owns session creation, so NRO clients do not need spare kernel
+    // session quota. SM also removes registrations when their process exits.
+    return smRegisterService(port, smEncodeName(ControlServiceName), false, MaxControlSessions);
 }
 Result runControlServer(Handle port, const std::function<std::string(std::string_view)> &handler) {
     std::array<Handle, MaxControlSessions + 1> handles{};

@@ -112,10 +112,16 @@ Result svcReplyAndReceive(s32 *index, const Handle *handles, s32 count, Handle r
     return Done;
 }
 int main() {
+    Handle port=INVALID_HANDLE;assert(smusic::createControlPort(&port)==0&&port==10);
     run(false);
     run(true);
     run(true, false, 8);
     run(false, true);
     std::cout << "Production IPC server survives nested TLS overwrite; malformed descriptors and short "
                  "output rejected\n";
+}
+
+Result smRegisterService(Handle* out,SmServiceName name,bool light,s32 sessions){
+    assert(std::string(name.name)==smusic::ControlServiceName&&!light&&sessions==smusic::MaxControlSessions);
+    *out=10;return 0;
 }

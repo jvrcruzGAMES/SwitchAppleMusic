@@ -43,7 +43,7 @@ void __appInit() {
     sockets.sb_efficiency=2;sockets.num_bsd_sessions=2;sockets.bsd_service_type=BsdServiceType_User;
     Result rc=socketInitialize(&sockets);if(R_FAILED(rc))diagAbortWithResult(rc);
 }
-void __appExit() {if(controlPortRegistered){Handle unused;svcManageNamedPort(&unused,ControlServiceName,0);}romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
+void __appExit() {if(controlPortRegistered){smUnregisterService(smEncodeName(ControlServiceName));}romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
 }
 class Player {
     ArtworkWorker artwork;
@@ -169,7 +169,7 @@ int main() {
         mkdir("sdmc:/config/switchmusic",0777);curl_global_init(CURL_GLOBAL_DEFAULT);
         if(R_FAILED(romfsMountFromFsdev("sdmc:/atmosphere/contents/420000000000534D/romfs.bin",0,"romfs")))throw std::runtime_error("Reinstall SwitchMusic: bundled certificate RomFS is missing");
         Player player;
-        // Named Horizon IPC port; network sockets above are only for backend HTTP.
+        // SM-registered Horizon IPC service; sockets are only for backend HTTP.
         Handle port=INVALID_HANDLE;
         Result rc=createControlPort(&port);
         if(R_FAILED(rc))throw std::runtime_error("Cannot register SwitchMusic IPC port");
@@ -185,7 +185,7 @@ int main() {
         }catch(...){rc=MAKERESULT(Module_Libnx,LibnxError_BadInput);}
         // Exit this module cleanly on a server failure; never turn a recoverable
         // control-channel error into a fatal system report or unwind a live worker.
-        Handle unused;svcManageNamedPort(&unused,ControlServiceName,0);controlPortRegistered=false;
+        smUnregisterService(smEncodeName(ControlServiceName));controlPortRegistered=false;
         player.shutdown();worker.join();svcCloseHandle(port);
         char message[96];std::snprintf(message,sizeof(message),"IPC server stopped: 0x%08x",unsigned(R_VALUE(rc)));
         std::ofstream("sdmc:/config/switchmusic/fatal.log")<<message;

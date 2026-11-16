@@ -104,3 +104,23 @@ Result svcConnectToNamedPort(Handle *, const char *);
 Result svcManageNamedPort(Handle *, const char *, s32);
 Result svcAcceptSession(Handle *, Handle);
 Result svcReplyAndReceive(s32 *, const Handle *, s32, Handle, u64);
+
+// Client-side service dispatch fixture support.
+inline constexpr u32 KernelError_OutOfSessions=7,KernelError_OutOfResource=132,KernelError_InvalidHandle=114;
+struct Service{Handle session=INVALID_HANDLE;};
+inline void serviceCreate(Service* service,Handle handle){service->session=handle;}
+inline constexpr unsigned SfBufferAttr_HipcMapAlias=1,SfBufferAttr_In=2,SfBufferAttr_Out=4;
+struct TestBuffer{const void* data;size_t size;};
+struct TestDispatchParams{unsigned buffer_attrs[2];TestBuffer buffers[2];};
+Result testClientDispatch(Service*,u32,u32,u32*,TestDispatchParams);
+#define serviceDispatchInOut(service,command,input,output,...) testClientDispatch((service),(command),(input),&(output),TestDispatchParams{__VA_ARGS__})
+Result svcSleepThread(int64_t);
+
+struct SmServiceName{char name[8];};
+inline SmServiceName smEncodeName(const char* name){SmServiceName result{};std::memcpy(result.name,name,std::strlen(name));return result;}
+struct TipcService{};
+TipcService* smGetServiceSessionTipc();
+Result smGetServiceOriginal(Handle*,SmServiceName);
+Result smRegisterService(Handle*,SmServiceName,bool,s32);
+Result testHasService(TipcService*,u32,SmServiceName,u8*);
+#define tipcDispatchInOut(service,command,input,output,...) testHasService((service),(command),(input),&(output))

@@ -19,8 +19,8 @@ The layouts and colors here are original; Switchfin is not a runtime dependency.
 
 C++ binds backend HTTP data, Horizon IPC playback controls, click/controller actions, visibility and state. Repeated
 music rows inflate `row.xml`; the queue snapshot is shared between their actions.
-The only custom rendering is the QR matrix, registered as `SwitchMusicQR` so its
-size and placement still come from XML. Borealis exposes theme tokens through a
+Custom rendering covers the QR matrix (`SwitchMusicQR`) and small vector transport
+glyphs (`SwitchMusicTransportIcon`); their sizing and placement still come from XML. Borealis exposes theme tokens through a
 C++ API, so the small global accent palette is set before XML inflation.
 The Nintendo Switch keyboard applet handles all text/password entry; the desktop
 preview uses Borealis’s desktop IME.
@@ -62,3 +62,12 @@ on the existing network worker. Page changes cancel stale image jobs; texture
 updates happen on the render thread. The 64-entry encoded-image cache is scoped
 to backend/session and cleared at account/guest transitions. Each page owns and
 releases its textures. A music-note placeholder remains when artwork is absent.
+
+Now Playing uses a two-column XML layout: cover/metadata, icon transport buttons,
+seek and volume on the left; a full-height synced-lyrics panel on the right.
+The active line is centered between the previous and next lines. Play/pause changes
+its vector glyph with playback state, retaining the standard button focus and
+controller bindings. The current cover uses a 256-pixel backend PNG and is cleared
+when the track changes; full-size covers do not enter the thumbnail cache.
+The desktop player fixture checks actual artwork loading, lyric placement, icon
+state, transport focus and the empty-player reset.

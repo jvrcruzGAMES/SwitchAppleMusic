@@ -27,6 +27,10 @@ class Backend(http.server.BaseHTTPRequestHandler):
         if self.path.startswith('/v1/artwork/'):
             raw=thumbnail();self.send_response(200);self.send_header('Content-Type','image/png');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path=='/auth/me':payload={'user':{'username':'demo','apple_linked':True},'csrf':'synthetic-csrf'}
+        elif self.path.startswith('/v1/lyrics/'):
+            payload={'provider':'syncedlyrics','lines':[{'time_ms':0,'text':'A little closer to the music'},
+                {'time_ms':10000,'text':'Let the night carry us home'},
+                {'time_ms':20000,'text':'Every moment has a melody'}]}
         elif self.path.startswith('/v1/catalog/search?'):
             term=parse_qs(urlsplit(self.path).query).get('term',[''])[0]
             payload={'items':[{'id':str(100+i),'type':'albums' if term=='preview' or i%3==0 else 'songs',

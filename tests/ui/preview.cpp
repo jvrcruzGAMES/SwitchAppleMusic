@@ -46,10 +46,15 @@ int main(int argc, char **argv) {
         library.browse("/v1/catalog/search?term=" + scene, "catalog", "Search results", false);
     } else if (scene == "player")
         library.playing();
+    Json playback = {{"status", "playing"}, {"paused", false}, {"position", 15.0}, {"duration", 215.0},
+                     {"volume", 70.0}, {"track", {{"id", "100"}, {"title", "Midnight Echoes"},
+                     {"artist", "The Northern Lights"}, {"album", "After Hours"},
+                     {"artwork_path", "/v1/artwork/songs/100"}}}};
     // Layout frames also exercise the real XML parser, view factories and focus.
     for (int i = 0; i < 90; ++i) {
         if (!brls::Application::mainLoop()) return 2;
         library.tick();
+        if (scene == "player") library.updatePlaybackState(playback);
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     assert(brls::Application::getCurrentFocus());
@@ -68,6 +73,33 @@ int main(int argc, char **argv) {
         assert(image && image->getTexture() > 0);
         auto cover = image->getFrame();
         assert(number.getMaxX() <= cover.getMinX() && cover.getMaxX() <= title.getMinX());
+    }
+
+    if (scene == "player") {
+        auto details = root->getView("player/details")->getFrame();
+        auto lyrics = root->getView("player/lyrics-panel")->getFrame();
+        assert(std::abs(details.getMinY()-lyrics.getMinY()) < 1);
+        assert(std::abs(details.getHeight()-lyrics.getHeight()) < 1 && lyrics.getHeight() >= 460);
+        assert(lyrics.getMinX() >= details.getMaxX());
+        auto* cover = dynamic_cast<brls::Image*>(root->getView("player/artwork"));
+        assert(cover && cover->getTexture() > 0 && cover->getFrame().getWidth() >= 140);
+        auto* icon = dynamic_cast<TransportIcon*>(root->getView("player/toggle/icon"));
+        assert(icon && icon->isPlaying());
+        playback["paused"] = true; library.updatePlaybackState(playback); assert(!icon->isPlaying());
+        playback["paused"] = false; library.updatePlaybackState(playback); assert(icon->isPlaying());
+        assert(dynamic_cast<brls::Label*>(root->getView("player/lyric"))->getFullText() == "Let the night carry us home");
+        for (auto id : {"player/previous", "player/toggle", "player/next"})
+            assert(dynamic_cast<brls::Button*>(root->getView(id))->getText().empty());
+        assert(root->getView("player/stop")->getFrame().getMaxY() <= details.getMaxY());
+        for (auto move : {std::pair{brls::BUTTON_NAV_LEFT, "player/previous"},
+                          {brls::BUTTON_NAV_RIGHT, "player/toggle"},
+                          {brls::BUTTON_NAV_RIGHT, "player/next"}}) {
+            brls::Application::onControllerButtonPressed(move.first, false);
+            assert(brls::Application::mainLoop());
+            assert(brls::Application::getCurrentFocus() == root->getView(move.second));
+        }
+        brls::Application::giveFocus(root->getView("player/toggle"));
+        std::cout << "Player artwork, full-height lyrics, icon state and controls verified" << std::endl;
     }
 
     if (scene == "navigation") {
@@ -150,6 +182,12 @@ int main(int argc, char **argv) {
         image << "P6\n" << w << " " << h << "\n255\n";
         for (int y = h - 1; y >= 0; --y)
             image.write(reinterpret_cast<char *>(pixels.data() + size_t(y) * w * 3), w * 3);
+    }
+    if (scene == "player") {
+        library.updatePlaybackState({{"status", "stopped"}});
+        assert(!dynamic_cast<TransportIcon*>(root->getView("player/toggle/icon"))->isPlaying());
+        assert(dynamic_cast<brls::Image*>(root->getView("player/artwork"))->getTexture() == 0);
+        assert(dynamic_cast<brls::Label*>(root->getView("player/lyric"))->getFullText() == "Lyrics appear here.");
     }
     std::cout << "READY " << scene << std::endl;
     // Optional hold permits capturing the actual OpenGL-rendered window.

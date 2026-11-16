@@ -65,6 +65,37 @@ class QRView : public brls::Box {
         nvgRestore(vg);
     }
 };
+// Vector transport glyphs stay sharp at any UI scale and need no bitmap assets.
+// XML owns the buttons, sizing and focus; code only draws the changing glyph.
+class TransportIcon : public brls::View {
+    std::string icon = "play";
+  public:
+    TransportIcon() {
+        registerStringXMLAttribute("icon", [this](const std::string& value) { icon = value; });
+    }
+    void setPlaying(bool playing) { icon = playing ? "pause" : "play"; }
+    bool isPlaying() const { return icon == "pause"; }
+    void draw(NVGcontext* vg, float x, float y, float width, float height, brls::Style,
+              brls::FrameContext*) override {
+        nvgSave(vg);
+        float size = std::min(width, height);
+        nvgTranslate(vg, x + (width-size)/2, y + (height-size)/2);
+        nvgScale(vg, size/24, size/24);
+        nvgBeginPath(vg);
+        if (icon == "pause") {
+            nvgRect(vg, 5, 4, 5, 16); nvgRect(vg, 14, 4, 5, 16);
+        } else if (icon == "previous") {
+            nvgRect(vg, 4, 4, 3, 16);
+            nvgMoveTo(vg, 19, 4); nvgLineTo(vg, 8, 12); nvgLineTo(vg, 19, 20); nvgClosePath(vg);
+        } else if (icon == "next") {
+            nvgRect(vg, 17, 4, 3, 16);
+            nvgMoveTo(vg, 5, 4); nvgLineTo(vg, 16, 12); nvgLineTo(vg, 5, 20); nvgClosePath(vg);
+        } else {
+            nvgMoveTo(vg, 6, 3); nvgLineTo(vg, 21, 12); nvgLineTo(vg, 6, 21); nvgClosePath(vg);
+        }
+        nvgFillColor(vg, nvgRGB(244, 245, 247)); nvgFill(vg); nvgRestore(vg);
+    }
+};
 struct Job {
     std::string type, path;
     Json request;
@@ -145,7 +176,7 @@ class Network {
                 if (job.type == "login")
                     result = signIn(active, job.request.at("password"));
                 else if (job.type == "artwork") {
-                    auto bytes = apiBytes(active, job.path, 128 * 1024, [this, epoch = job.generation] {
+                    auto bytes = apiBytes(active, job.path, 256 * 1024, [this, epoch = job.generation] {
                         return artworkGeneration.load() != epoch;
                     });
                     result = {{"bytes", Json::binary(std::move(bytes))}};
@@ -183,7 +214,7 @@ static std::string timeText(double seconds) {
     return std::to_string(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + std::to_string(s % 60);
 }
 // XML owns every static layout. C++ binds data/actions and creates only repeated
-// XML track rows plus the server-generated QR pixel view.
+// XML track rows, the server-generated QR view and vector transport glyphs.
 class Library {
     Network &net;
     Config config;
@@ -199,7 +230,7 @@ class Library {
                 *credit = nullptr, *volume = nullptr, *album = nullptr, *qrTimer = nullptr;
     brls::View *fill = nullptr;
     Json currentUser = Json::object(), state = Json::object(), items = Json::array(), lines = Json::array();
-    std::string screen, currentPath, kind, pageTitle, lyricId, qrCode;
+    std::string screen, currentPath, kind, pageTitle, lyricId, qrCode, playerArtworkPath;
     bool inSettings = false, qrActive = false, qrPending = false, now = false, polling = false;
     unsigned generation = 0, authGeneration = 0;
     size_t selection = 0;
@@ -251,6 +282,7 @@ class Library {
         view<brls::Button>(frame, "nav/account")->setText(loggedIn ? "Settings" : "Account");
     }
     void setPage(const std::string &layout, const std::string &mode) {
+        playerArtworkPath.clear();
         artworkViews.clear();
         artworkQueue.clear();
         artworkPending = false;
@@ -323,6 +355,7 @@ class Library {
         theme.addColor("brls/button/primary_enabled_text", nvgRGB(255, 255, 255));
         theme.addColor("brls/button/default_enabled_background", nvgRGB(42, 48, 61));
         theme.addColor("brls/button/enabled_border_color", nvgRGB(75, 84, 104));
+        brls::Application::registerXMLView("SwitchMusicTransportIcon", [] { return new TransportIcon(); });
         brls::Application::registerXMLView("SwitchMusicQR", [] { return new QRView(); });
         frame = dynamic_cast<brls::AppletFrame *>(xml("shell"));
         if (!frame) throw std::runtime_error("Invalid shell XML");
@@ -835,6 +868,10 @@ class Library {
         focus("player/toggle");
         renderState();
     }
+    void updatePlaybackState(Json snapshot) {
+        state = std::move(snapshot);
+        renderState();
+    }
     void renderState() {
         notice->setText(state.contains("error") && !state["error"].get<std::string>().empty()
                             ? state["error"].get<std::string>()
@@ -848,14 +885,30 @@ class Library {
         progress->setText(timeText(position) + " / " + timeText(duration));
         volume->setText("Volume " + std::to_string(int(state.value("volume", 70.0))) + "%");
         fill->setWidthPercentage(duration > 0 ? float(std::clamp(position / duration, 0.0, 1.0) * 100) : 0);
-        view<brls::Button>(page, "player/toggle")->setText(state.value("paused", false) ? "Play" : "Pause");
         auto id = song.value("id", std::string{});
-        if (id.empty()) view<brls::Button>(page, "player/toggle")->setText("Play");
-        if (!id.empty() && id != lyricId) {
+        view<TransportIcon>(page, "player/toggle/icon")->setPlaying(
+            !id.empty() && !state.value("paused", false) && state.value("status", std::string{}) != "stopped");
+        auto artwork = song.value("artwork_path", std::string{});
+        auto path = artwork.rfind("/v1/artwork/", 0) == 0 ? artwork + "?size=256" : std::string{};
+        if (path != playerArtworkPath) {
+            playerArtworkPath = path;
+            auto* image = view<brls::Image>(page, "player/artwork");
+            image->clear();
+            artworkViews.clear();
+            artworkQueue.clear();
+            if (!path.empty()) {
+                artworkViews[path].push_back(image);
+                artworkQueue.push_back(path);
+            }
+        }
+        if (id != lyricId) {
             lyricId = id;
             lines = Json::array();
-            lyric->setText("Loading lyrics…");
-            net.submit({"lyrics", "/v1/lyrics/" + encode(id), {}, generation});
+            nearby->setText("");
+            view<brls::Label>(page, "player/previous-line")->setText("");
+            credit->setText("syncedlyrics");
+            lyric->setText(id.empty() ? "Lyrics appear here." : "Loading lyrics…");
+            if (!id.empty()) net.submit({"lyrics", "/v1/lyrics/" + encode(id), {}, generation});
         }
         if (!lines.empty()) {
             long ms = long(position * 1000);
@@ -867,6 +920,8 @@ class Library {
                     break;
             }
             lyric->setText(active >= 0 ? lines[active].value("text", std::string{}) : "♪");
+            view<brls::Label>(page, "player/previous-line")->setText(
+                active > 0 ? lines[active-1].value("text", std::string{}) : "");
             nearby->setText(active + 1 < int(lines.size()) ? lines[active + 1].value("text", std::string{})
                                                            : "");
         }
@@ -927,6 +982,9 @@ class Library {
                     if (found != artworkViews.end())
                         for (auto *image : found->second)
                             image->setImageFromMem(cached->data(), cached->size());
+                    // Keep only the current full-size cover texture. The shared
+                    // 64-entry compressed cache is reserved for small row art.
+                    if (job.path.find("?size=64") == std::string::npos) continue;
                     auto key = config.backend + "\n" + config.session + "\n" + job.path;
                     artworkCache[key] = std::move(cached);
                     artworkLRU.push_back(key);
@@ -973,8 +1031,7 @@ class Library {
                 continue;
             }
             if (job.type == "state") {
-                state = result;
-                renderState();
+                updatePlaybackState(result);
             } else if (job.type == "command") {
                 if (result.contains("error")) notice->setText(result["error"]);
             } else if (result.contains("error")) {

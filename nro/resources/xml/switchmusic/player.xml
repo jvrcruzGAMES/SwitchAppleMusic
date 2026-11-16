@@ -1,36 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
-<brls:Box axis="column" width="100%" height="auto">
-    <brls:Label text="NOW PLAYING" fontSize="15" textColor="#FA4566" marginBottom="10"/>
-    <brls:Label id="page/title" text="Nothing playing" fontSize="34" textColor="#F4F5F7" marginBottom="10" singleLine="true"/>
-    <brls:Label id="page/subtitle" text="Choose a song from Search or your library." fontSize="19" textColor="#A9B0BF" marginBottom="24" singleLine="true"/>
-    <brls:Box axis="row" alignItems="stretch">
-        <brls:Box axis="column" width="390" shrink="0" padding="24" backgroundColor="#1C212D" cornerRadius="14" marginRight="20">
-            <brls:Label id="player/album" text="Ready when you are." fontSize="22" textColor="#F4F5F7" marginBottom="8" singleLine="true"/>
-            <brls:Label id="player/time" text="0:00 / 0:00" fontSize="18" textColor="#A9B0BF" marginBottom="10"/>
-            <brls:Box height="6" width="100%" backgroundColor="#343B4B" cornerRadius="3" marginTop="4" marginBottom="18">
-                <brls:Box id="player/fill" width="0%" height="6" backgroundColor="#FA4566" cornerRadius="3"/>
+<brls:Box axis="row" width="100%" height="466" alignItems="stretch">
+    <brls:Box id="player/details" axis="column" width="390" shrink="0" padding="20" backgroundColor="#1C212D" cornerRadius="14" marginRight="20">
+        <brls:Label text="NOW PLAYING" fontSize="14" textColor="#FA4566" marginBottom="18"/>
+        <brls:Box axis="row" alignItems="center" marginBottom="22" shrink="0">
+            <brls:Box width="140" height="140" shrink="0" marginRight="18" backgroundColor="#2A303D" cornerRadius="10" alignItems="center" justifyContent="center">
+                <brls:Label text="♪" fontSize="48" textColor="#9099AA"/>
+                <brls:Image id="player/artwork" width="140" height="140" cornerRadius="10" positionType="absolute" positionLeft="0" positionTop="0"/>
             </brls:Box>
-            <brls:Box axis="row">
-                <brls:Button id="player/previous" text="Previous" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" grow="1" style="borderless" marginRight="8"/>
-                <brls:Button id="player/toggle" text="Play / Pause" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" grow="1" style="primary" marginRight="8"/>
-                <brls:Button id="player/next" text="Next" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" grow="1" style="borderless"/>
-            </brls:Box>
-            <brls:Box axis="row">
-                <brls:Button id="player/rewind" text="−15 sec" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" grow="1" style="bordered" marginRight="12"/>
-                <brls:Button id="player/forward" text="+15 sec" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" grow="1" style="bordered"/>
-            </brls:Box>
-            <brls:Label id="player/volume" text="Volume 70%" fontSize="17" textColor="#A9B0BF" marginBottom="10"/>
-            <brls:Box axis="row">
-                <brls:Button id="player/quieter" text="−5" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" grow="1" style="borderless" marginRight="12"/>
-                <brls:Button id="player/louder" text="+5" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" grow="1" style="borderless"/>
-                <brls:Button id="player/stop" text="Stop" height="46" shrink="0" marginBottom="8" cornerRadius="10" fontSize="18" style="borderless" grow="1" marginLeft="8"/>
+            <brls:Box axis="column" grow="1" minWidth="0">
+                <brls:Label id="page/title" text="Nothing playing" fontSize="25" textColor="#F4F5F7" marginBottom="10" singleLine="true"/>
+                <brls:Label id="page/subtitle" text="Choose a song to begin." fontSize="18" textColor="#A9B0BF" marginBottom="8" singleLine="true"/>
+                <brls:Label id="player/album" text="Ready when you are." fontSize="16" textColor="#9099AA" singleLine="true"/>
             </brls:Box>
         </brls:Box>
-        <brls:Box axis="column" grow="1" minWidth="0" padding="24" backgroundColor="#201E2A" cornerRadius="14">
-            <brls:Label text="LYRICS" fontSize="14" textColor="#FA4566" marginBottom="10"/>
-            <brls:Label id="player/lyric" text="Lyrics appear here." fontSize="28" textColor="#F4F5F7" marginBottom="10"/>
-            <brls:Label id="player/nearby" text="" fontSize="22" textColor="#9099AA" marginBottom="10"/>
-            <brls:Label id="player/credit" text="syncedlyrics" fontSize="14" textColor="#9099AA" marginBottom="10" marginTop="24"/>
+        <brls:Label id="player/time" text="0:00 / 0:00" fontSize="16" textColor="#A9B0BF" marginBottom="8"/>
+        <brls:Box height="5" width="100%" shrink="0" backgroundColor="#343B4B" cornerRadius="3" marginBottom="16">
+            <brls:Box id="player/fill" width="0%" height="5" backgroundColor="#FA4566" cornerRadius="3"/>
         </brls:Box>
+        <brls:Box axis="row" justifyContent="center" marginBottom="14" shrink="0">
+            <brls:Button id="player/previous" height="52" width="90" padding="0" cornerRadius="12" style="borderless" marginRight="16">
+                <SwitchMusicTransportIcon icon="previous" width="28" height="28"/>
+            </brls:Button>
+            <brls:Button id="player/toggle" height="52" width="90" padding="0" cornerRadius="12" style="primary" marginRight="16">
+                <SwitchMusicTransportIcon id="player/toggle/icon" icon="play" width="30" height="30"/>
+            </brls:Button>
+            <brls:Button id="player/next" height="52" width="90" padding="0" cornerRadius="12" style="borderless">
+                <SwitchMusicTransportIcon icon="next" width="28" height="28"/>
+            </brls:Button>
+        </brls:Box>
+        <brls:Box axis="row" shrink="0" marginBottom="12">
+            <brls:Button id="player/rewind" text="−15 sec" height="34" padding="0" cornerRadius="8" fontSize="16" grow="1" style="bordered" marginRight="12"/>
+            <brls:Button id="player/forward" text="+15 sec" height="34" padding="0" cornerRadius="8" fontSize="16" grow="1" style="bordered"/>
+        </brls:Box>
+        <brls:Box grow="1"/>
+        <brls:Label id="player/volume" text="Volume 70%" fontSize="15" textColor="#A9B0BF" marginBottom="6"/>
+        <brls:Box axis="row" shrink="0">
+            <brls:Button id="player/quieter" text="−5" height="34" padding="0" cornerRadius="8" fontSize="16" grow="1" style="borderless" marginRight="12"/>
+            <brls:Button id="player/louder" text="+5" height="34" padding="0" cornerRadius="8" fontSize="16" grow="1" style="borderless"/>
+            <brls:Button id="player/stop" text="Stop" height="34" padding="0" cornerRadius="8" fontSize="16" style="borderless" grow="1" marginLeft="8"/>
+        </brls:Box>
+    </brls:Box>
+    <brls:Box id="player/lyrics-panel" axis="column" grow="1" minWidth="0" padding="26" backgroundColor="#201E2A" cornerRadius="14">
+        <brls:Label text="SYNCED LYRICS" fontSize="14" textColor="#FA4566"/>
+        <brls:Box axis="column" grow="1" justifyContent="center" minHeight="0">
+            <brls:Label id="player/previous-line" text="" fontSize="22" textColor="#777E8D" marginBottom="20"/>
+            <brls:Label id="player/lyric" text="Lyrics appear here." fontSize="30" textColor="#F4F5F7" marginBottom="20"/>
+            <brls:Label id="player/nearby" text="" fontSize="22" textColor="#9099AA"/>
+        </brls:Box>
+        <brls:Label id="player/credit" text="syncedlyrics" fontSize="13" textColor="#9099AA" marginTop="12"/>
     </brls:Box>
 </brls:Box>

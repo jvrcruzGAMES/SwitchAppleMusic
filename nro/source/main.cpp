@@ -137,6 +137,7 @@ class Network {
                 } else if (job.type.rfind("qr_", 0) == 0)
                     result = post(active, job.path, job.request);
                 else
+                    // Playback commands use Horizon IPC; paths use backend HTTP.
                     result = job.path.empty() ? control(active, job.request) : api(active, job.path);
                 if (job.type == "login" || job.type == "auth") {
                     if (!result.is_object() || !result.contains("user") || !result["user"].is_object() ||

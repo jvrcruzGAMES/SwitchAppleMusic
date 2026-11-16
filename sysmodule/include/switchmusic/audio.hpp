@@ -12,8 +12,8 @@ class HttpInput {
     struct Impl;std::unique_ptr<Impl> impl;
 public:
     HttpInput(Config config,Cancel cancel={});~HttpInput();
-    std::string text(const std::string& path,size_t limit=32*1024);
-    void open(const std::string& path);
+    std::string text(const std::string& path,size_t initialCapacity=32*1024);
+    void open(const std::string& path,int64_t expectedSize=-1);
     int read(uint8_t* output,int count);
     int64_t seek(int64_t offset,int whence);
 };

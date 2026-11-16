@@ -1,10 +1,10 @@
 #include <switch.h>
 #include <switchmusic/client.hpp>
+#include <switchmusic/ipc.hpp>
+#include <switchmusic/control_server.hpp>
 #include <switchmusic/audio.hpp>
 #include <switchmusic/audio_output.hpp>
 #include <curl/curl.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <atomic>
@@ -19,6 +19,7 @@
 #define SWITCHMUSIC_HEAP_MB 8
 #endif
 using namespace smusic;
+static bool controlPortRegistered=false;
 extern "C" {
 void __libnx_init_time(void);
 u32 __nx_applet_type=AppletType_None;
@@ -40,7 +41,7 @@ void __appInit() {
     sockets.sb_efficiency=2;sockets.num_bsd_sessions=2;sockets.bsd_service_type=BsdServiceType_User;
     Result rc=socketInitialize(&sockets);if(R_FAILED(rc))diagAbortWithResult(rc);
 }
-void __appExit() {romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
+void __appExit() {if(controlPortRegistered){Handle unused;svcManageNamedPort(&unused,ControlServiceName,0);}romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
 }
 class Player {
     Config config;std::mutex lock;std::deque<Json> commands;
@@ -160,20 +161,20 @@ int main() {
         mkdir("sdmc:/config/switchmusic",0777);curl_global_init(CURL_GLOBAL_DEFAULT);
         if(R_FAILED(romfsMountFromFsdev("sdmc:/atmosphere/contents/420000000000534D/romfs.bin",0,"romfs")))throw std::runtime_error("Reinstall SwitchMusic: bundled certificate RomFS is missing");
         Player player;
-        int server=socket(AF_INET,SOCK_STREAM,0);if(server<0)throw std::runtime_error("Control socket failed");
-        sockaddr_in addr{};addr.sin_family=AF_INET;addr.sin_port=htons(ControlPort);addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
-        int yes=1;setsockopt(server,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes));
-        if(bind(server,reinterpret_cast<sockaddr*>(&addr),sizeof(addr))<0||listen(server,4)<0) {throw std::runtime_error("Control bind failed");}
+        // Named Horizon IPC port; network sockets above are only for backend HTTP.
+        Handle port=INVALID_HANDLE;
+        Result rc=createControlPort(&port);
+        if(R_FAILED(rc))throw std::runtime_error("Cannot register SwitchMusic IPC port");
+        controlPortRegistered=true;
         std::thread worker([&]{player.run();});
-        while(true) {
-            int fd=accept(server,nullptr,nullptr);if(fd<0){svcSleepThread(100000000);continue;}
-            timeval tv{0,300000};setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
-            Json request;
-            try {if(receiveFrame(fd,request)) {
+        rc=runControlServer(port,[&](std::string_view raw){
+            try {
                 auto config=Config::load();
-                if(request.value("version",0)!=2||request.value("session",std::string{})!=config.session)sendFrame(fd,error("Open SwitchMusic to sign in again"));
-                else sendFrame(fd,player.request(request));
-            }}catch(const std::exception& e){sendFrame(fd,error(e.what()));}catch(...){sendFrame(fd,error("Malformed request"));}close(fd);
-        }
+                return dispatchControlMessage(raw,config.session,[&](const Json& request){return player.request(request);});
+            }catch(const std::exception& e){return encodeControlReply(error(e.what()));}
+        });
+        // A fatal kernel server error must stop the worker and all audio services
+        // with the process; never unwind a live worker referencing stack objects.
+        diagAbortWithResult(rc);
     }catch(const std::exception& e){std::ofstream("sdmc:/config/switchmusic/fatal.log")<<e.what();return 1;}
 }

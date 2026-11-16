@@ -22,7 +22,7 @@ def main():
     run([cc,*flags,'-DSWITCHMUSIC_BUDGET_PROBE','-c',ROOT/'tests/audio/decode.c','-o',out/'decode.o'],env=env)
     includes=[f'-I{ROOT}/common/include',f'-I{ROOT}/third_party/json']
     objects=[]
-    for source,name in [(ROOT/'tests/audio/switch_budget.cpp','budget'),(ROOT/'common/src/client.cpp','client')]:
+    for source,name in [(ROOT/'tests/audio/switch_budget.cpp','budget'),(ROOT/'common/src/client.cpp','client'),(ROOT/'common/src/ipc.cpp','ipc')]:
         obj=out/(name+'.o');objects.append(obj)
         run([cxx,'-std=c++17',*flags,*includes,'-c',source,'-o',obj],env=env)
     elf=out/'switchmusic-audio-budget.elf'

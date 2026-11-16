@@ -31,7 +31,7 @@ struct AudioDecoder::Impl {
     void open(const std::string& manifest){
         const auto text=input.text(manifest);
         std::istringstream lines(text);std::string line,map,media;long long init=0,count=0,start=0;bool end=false;
-        if(text.rfind("#EXTM3U\n",0)!=0)throw std::runtime_error("Invalid backend M3U8");
+        if(text.rfind("#EXTM3U\n",0)!=0&&text.rfind("#EXTM3U\r\n",0)!=0)throw std::runtime_error("Invalid backend M3U8");
         while(std::getline(lines,line)){
             if(!line.empty()&&line.back()=='\r')line.pop_back();
             if(line.rfind("#EXT-X-KEY:",0)==0)throw std::runtime_error("Backend returned encrypted audio");
@@ -40,9 +40,9 @@ struct AudioDecoder::Impl {
             if(!line.empty()&&line[0]!='#'){if(!media.empty())throw std::runtime_error("Expected single-file backend VOD");media=line;}
             if(line=="#EXT-X-ENDLIST")end=true;
         }
-        if(!end||media.rfind("/v1/stream/",0)!=0||media!=map||init<=0||start!=init||count<=0||init>512LL*1024*1024-count)throw std::runtime_error("Unsupported backend VOD layout");
-        input.open(media);if(input.seek(0,AVSEEK_SIZE)!=init+count)throw std::runtime_error("HLS media length changed");
-        av_max_alloc(2*1024*1024);av_log_set_level(AV_LOG_ERROR);
+        if(!end||media.rfind("/v1/stream/",0)!=0||media!=map||init<=0||start!=init||count<=0||init>INT64_MAX-count)throw std::runtime_error("Unsupported backend VOD layout");
+        input.open(media,init+count);if(input.seek(0,AVSEEK_SIZE)!=init+count)throw std::runtime_error("HLS media length changed");
+        av_log_set_level(AV_LOG_ERROR);
         auto* buffer=static_cast<unsigned char*>(av_malloc(32*1024));if(!buffer)throw std::bad_alloc();
         io=avio_alloc_context(buffer,32*1024,0,this,read,nullptr,seek);if(!io){av_free(buffer);throw std::bad_alloc();}
         io->seekable=AVIO_SEEKABLE_NORMAL;
@@ -56,7 +56,7 @@ struct AudioDecoder::Impl {
         codec=avcodec_alloc_context3(avcodec_find_decoder(parameters->codec_id));if(!codec)throw std::bad_alloc();
         check(avcodec_parameters_to_context(codec,parameters));
         if(codec->sample_rate<8000||codec->sample_rate>192000||codec->ch_layout.nb_channels<1||codec->ch_layout.nb_channels>8)throw std::runtime_error("Unsupported audio layout or rate");
-        codec->pkt_timebase=stream->time_base;codec->thread_count=1;codec->max_samples=8*32768;check(avcodec_open2(codec,codec->codec,nullptr));
+        codec->pkt_timebase=stream->time_base;codec->thread_count=1;check(avcodec_open2(codec,codec->codec,nullptr));
         length=stream->duration!=AV_NOPTS_VALUE?stream->duration*av_q2d(stream->time_base):format->duration!=AV_NOPTS_VALUE?double(format->duration)/AV_TIME_BASE:0;
         if(length>0)remaining=int64_t(std::llround(length*codec->sample_rate));
         packet=av_packet_alloc();frame=av_frame_alloc();if(!packet||!frame)throw std::bad_alloc();
@@ -86,7 +86,7 @@ struct AudioDecoder::Impl {
             if(sentEnd)throw std::runtime_error("Decoder failed to drain");
             do{av_packet_unref(packet);rc=av_read_frame(format,packet);if(rc<0)break;}while(packet->stream_index!=audio);
             if(rc==AVERROR_EOF){check(avcodec_send_packet(codec,nullptr));sentEnd=true;}
-            else{check(rc);if(packet->size>1024*1024)throw std::runtime_error("Audio packet exceeds memory bound");check(avcodec_send_packet(codec,packet));av_packet_unref(packet);}
+            else{check(rc);check(avcodec_send_packet(codec,packet));av_packet_unref(packet);}
         }
     }
     bool convert(){
@@ -119,7 +119,7 @@ void AudioDecoder::seek(double seconds){
     avcodec_free_context(&impl->codec);auto* parameters=stream->codecpar;
     impl->codec=avcodec_alloc_context3(avcodec_find_decoder(parameters->codec_id));if(!impl->codec)throw std::bad_alloc();
     impl->check(avcodec_parameters_to_context(impl->codec,parameters));impl->codec->pkt_timebase=stream->time_base;
-    impl->codec->thread_count=1;impl->codec->max_samples=8*32768;impl->check(avcodec_open2(impl->codec,impl->codec->codec,nullptr));
+    impl->codec->thread_count=1;impl->check(avcodec_open2(impl->codec,impl->codec->codec,nullptr));
     impl->offset=impl->scratchOffset=impl->scratchFrames=0;impl->ended=impl->drained=impl->sentEnd=false;impl->target=seconds;impl->discardOutput=0;
     impl->remaining=impl->length>0?int64_t(std::llround((impl->length-seconds)*impl->codec->sample_rate)):INT64_MAX;
 }

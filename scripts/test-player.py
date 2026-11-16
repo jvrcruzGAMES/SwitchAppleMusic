@@ -5,6 +5,7 @@ import http.server
 import json
 import os
 import re
+import socket
 from pathlib import Path
 import shlex
 import subprocess
@@ -20,6 +21,27 @@ class Server(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.headers.get('Cookie')!='switchmusic_session='+'a'*43:
             self.send_error(401);return
+        if self.path=='/v1/large-metadata':
+            raw=b'x'*(600*1024);self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
+        if self.path=='/v1/unavailable':self.send_error(503);return
+        if self.path=='/v1/disconnect':
+            self.close_connection=True;self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
+        if self.path=='/v1/stream/large':
+            size=3*1024*1024*1024+123;begin,end=map(int,self.headers['Range'][6:].split('-'));end=min(end,size-1)
+            self.send_response(206);self.send_header('Content-Range',f'bytes {begin}-{end}/{size}');self.send_header('Content-Length',str(end-begin+1));self.end_headers()
+            try:self.wfile.write(bytes(i%251 for i in range(begin,end+1)))
+            except (BrokenPipeError,ConnectionResetError):pass
+            return
+        if self.path=='/v1/stream/chunked':
+            self.server.chunked_requests+=1
+            self.send_response(200);self.send_header('Transfer-Encoding','chunked');self.end_headers()
+            try:
+                for offset in range(0,600*1024,8192):
+                    raw=bytes(i%251 for i in range(offset,min(offset+8192,600*1024)))
+                    self.wfile.write(f'{len(raw):x}\r\n'.encode()+raw+b'\r\n')
+                self.wfile.write(b'0\r\n\r\n')
+            except (BrokenPipeError,ConnectionResetError):pass
+            return
         media=self.server.media;manifest=self.server.manifest
         if self.path.startswith('/v1/playback/'):
             raw=manifest.encode()
@@ -27,6 +49,8 @@ class Server(http.server.BaseHTTPRequestHandler):
             if self.path.endswith('bad-range.m3u8'):raw=raw.replace(b'/v1/stream/123',b'/v1/stream/200')
             if self.path.endswith('changed.m3u8'):raw=raw.replace(b'/v1/stream/123',b'/v1/stream/201')
             if self.path.endswith('encrypted.m3u8'):raw=raw.replace(b'#EXTM3U',b'#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI="private"')
+            if self.path.endswith('crlf.m3u8'):raw=raw.replace(b'\n',b'\r\n')
+            if self.path.endswith('large-manifest.m3u8'):raw=raw.replace(b'#EXTM3U\n',b'#EXTM3U\n#'+b'x'*(300*1024)+b'\n')
             if self.path.endswith('expired.m3u8'):self.send_error(401);return
             self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
         size=media.stat().st_size
@@ -79,7 +103,20 @@ def main():
                     reference.write_bytes(full[120000*4:]);compare(middle,reference,name+' middle seek')
                     assert server.ranges>0
                     print(name+f': decoded PCM, seek, EOF and cancellation passed; tracked heap peak {peak} bytes')
-                for fixture in ['external','bad-range','expired','changed','encrypted']:
+                    # Same PCM and seeks through a server/proxy that ignores Range.
+                    result=run([binary,url,'/v1/playback/bad-range.m3u8',actual,seeked,middle],stderr=subprocess.PIPE)
+                    reference.write_bytes(full);compare(actual,reference,name+' full-response fallback')
+                    reference.write_bytes(full[48000*4:]);compare(seeked,reference,name+' full-response seek')
+                    reference.write_bytes(full[120000*4:]);compare(middle,reference,name+' full-response middle seek')
+                    print(name+': streamed full-response fallback and seeking passed')
+                for fixture in ['crlf','large-manifest']:
+                    run([binary,url,'/v1/playback/'+fixture+'.m3u8',actual,seeked,middle])
+                    reference.write_bytes(full);compare(actual,reference,fixture)
+                    print(fixture+': streamed playback passed')
+                server.chunked_requests=0
+                run([binary,url,'--http-checks'])
+                assert server.chunked_requests==2,server.chunked_requests
+                for fixture in ['external','expired','changed','encrypted']:
                     result=subprocess.run([str(binary),url,'/v1/playback/'+fixture+'.m3u8',str(actual),str(seeked),str(middle)],capture_output=True)
                     assert result.returncode!=0,fixture
                     print(fixture+': rejected')

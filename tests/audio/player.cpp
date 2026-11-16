@@ -3,9 +3,37 @@
 #include <array>
 #include <cstdio>
 #include <iostream>
+#include <cassert>
 using namespace smusic;
 int main(int argc,char** argv){
-    if(argc!=6)return 2;curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    if(argc==3&&std::string(argv[2])=="--http-checks"){
+        Config config{argv[1],"admin",std::string(43,'a')};
+        HttpInput input(config);
+        assert(input.text("/v1/large-metadata").size()==600*1024);
+        constexpr int64_t large=3LL*1024*1024*1024+123;
+        input.open("/v1/stream/large",large);assert(input.seek(0,0x10000)==large);
+        std::array<uint8_t,4096> bytes;
+        for(int64_t offset:{0LL,2LL*1024*1024*1024+17}){
+            assert(input.seek(offset,SEEK_SET)==offset);assert(input.read(bytes.data(),bytes.size())==int(bytes.size()));
+            for(size_t i=0;i<bytes.size();++i)assert(bytes[i]==(offset+i)%251);
+        }
+        input.open("/v1/stream/chunked",600*1024);
+        size_t streamed=0;int count;
+        while((count=input.read(bytes.data(),bytes.size()))>0){
+            for(int i=0;i<count;++i)assert(bytes[i]==(streamed+i)%251);
+            streamed+=count;
+        }
+        assert(streamed==600*1024);
+        assert(input.seek(400*1024,SEEK_SET)==400*1024);
+        assert(input.read(bytes.data(),bytes.size())==int(bytes.size()));
+        for(size_t i=0;i<bytes.size();++i)assert(bytes[i]==(400*1024+i)%251);
+        bool reported=false;try{input.text("/v1/unavailable");}catch(const HttpError& error){reported=error.status==503;}assert(reported);
+        reported=false;try{input.text("/v1/disconnect");}catch(const std::exception& error){reported=std::string(error.what()).find("Playback transport:")!=std::string::npos;}assert(reported);
+        std::cout<<"Large metadata, 3 GiB media seeks, chunked full-response fallback and precise transport errors passed\n";
+        return 0;
+    }
+    if(argc!=6)return 2;
     try{
         Config config{argv[1],"admin",std::string(43,'a')};bool cancelled=false;
         AudioDecoder decoder(config,argv[2],[&]{return cancelled;});std::array<int16_t,4096*2> pcm;

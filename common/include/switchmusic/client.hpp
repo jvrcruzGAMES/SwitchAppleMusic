@@ -4,8 +4,6 @@
 #include <stdexcept>
 namespace smusic {
 using Json = nlohmann::json;
-constexpr unsigned ControlPort = 17837;
-constexpr size_t MaxFrame = 64 * 1024;
 struct Config {
     std::string backend, username, session;
     static constexpr const char* Path = "sdmc:/config/switchmusic/config.json";
@@ -27,6 +25,4 @@ Json post(const Config&, const std::string& path, const Json& body);
 Json signIn(Config, const std::string& password);
 void signOut(const Config&);
 Json control(const Config&, Json request);
-bool receiveFrame(int fd, Json& value);
-bool sendFrame(int fd, const Json& value);
 }

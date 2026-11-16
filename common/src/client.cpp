@@ -1,7 +1,5 @@
 #include <switchmusic/client.hpp>
 #include <curl/curl.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <unistd.h>
 #include <fstream>
 #include <stdexcept>
@@ -128,30 +126,5 @@ Json api(const Config& c,const std::string& path) {
     std::string raw;request(c,path,&raw,collect,35);
     auto j=Json::parse(raw,nullptr,false);
     if(j.is_discarded()) throw std::runtime_error("Invalid backend JSON");return j;
-}
-static bool transfer(int fd,void* data,size_t n,bool sending) {
-    auto* p=static_cast<char*>(data);
-    while(n) {auto done=sending?send(fd,p,n,0):recv(fd,p,n,0); if(done<=0)return false;p+=done;n-=done;}
-    return true;
-}
-bool receiveFrame(int fd,Json& value) {
-    uint32_t n;if(!transfer(fd,&n,4,false))return false;n=ntohl(n);
-    if(!n||n>MaxFrame)return false;std::string raw(n,'\0');
-    if(!transfer(fd,raw.data(),n,false))return false;
-    value=Json::parse(raw,nullptr,false);return value.is_object();
-}
-bool sendFrame(int fd,const Json& value) {
-    auto raw=value.dump();if(raw.size()>MaxFrame)return false;uint32_t n=htonl(raw.size());
-    return transfer(fd,&n,4,true)&&transfer(fd,raw.data(),raw.size(),true);
-}
-Json control(const Config& c,Json req) {
-    int fd=socket(AF_INET,SOCK_STREAM,0);if(fd<0)return error("Socket unavailable");
-    timeval tv{0,300000};setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
-    setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&tv,sizeof(tv));
-    sockaddr_in addr{};addr.sin_family=AF_INET;addr.sin_port=htons(ControlPort);addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
-    Json result;
-    req["version"]=2;req["session"]=c.session;
-    bool ok=connect(fd,reinterpret_cast<sockaddr*>(&addr),sizeof(addr))==0&&sendFrame(fd,req)&&receiveFrame(fd,result);
-    close(fd);return ok?result:error("SwitchMusic sysmodule unavailable");
 }
 }

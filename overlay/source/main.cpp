@@ -29,8 +29,6 @@ public:
     }
 };
 class MusicOverlay:public tsl::Overlay {
-    void initServices() override {socketInitializeDefault();}
-    void exitServices() override {socketExit();}
     std::unique_ptr<tsl::Gui> loadInitialGui() override{return initially<Controls>();}
 };
 int main(int argc,char** argv){return tsl::loop<MusicOverlay>(argc,argv);}

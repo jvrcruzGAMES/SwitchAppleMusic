@@ -17,7 +17,7 @@ The layouts and colors here are original; Switchfin is not a runtime dependency.
 | `qr.xml` | Apple linking instructions, confirmation, timer and QR placement |
 | `message.xml` | Loading and recoverable error states |
 
-C++ binds network data, click/controller actions, visibility and state. Repeated
+C++ binds backend HTTP data, Horizon IPC playback controls, click/controller actions, visibility and state. Repeated
 music rows inflate `row.xml`; the queue snapshot is shared between their actions.
 The only custom rendering is the QR matrix, registered as `SwitchMusicQR` so its
 size and placement still come from XML. Borealis exposes theme tokens through a

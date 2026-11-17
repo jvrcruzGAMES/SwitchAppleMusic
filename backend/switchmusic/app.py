@@ -262,7 +262,7 @@ def create_app(settings=None,transport=None):
 
     @app.get('/v1/artwork/{kind}/{resource_id}')
     async def artwork(kind: str,resource_id: str,request: Request,size: int=Query(64),format: str=Query('png')):
-        if size not in (64,256) or format not in ('png','rgba4444') or (format=='rgba4444' and size!=256):
+        if size not in (64,256) or format not in ('png','rgba4444'):
             raise HTTPException(400,'Unsupported artwork variant')
         resource_id=valid_id(resource_id)
         if kind in ('songs','albums','playlists'):

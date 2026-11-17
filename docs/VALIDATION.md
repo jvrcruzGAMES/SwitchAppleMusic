@@ -63,3 +63,10 @@ controller preview/apply/cancel, preview stability across state polls, boundary
 clamping, touch dragging with one seek on release, progress-thumb position,
 track-change resets and disabled state. The Switch build uses real libultrahand;
 physical rendering and touch remain hardware acceptance checks.
+
+The app-artwork fixture now asserts rendered RGB values inside actual cover views,
+not merely nonzero texture IDs. It covers collection rows and Now Playing, an older
+backend that rejects 64-pixel raw images, and a malformed first response followed
+by a successful retry. Pixel conversion tests verify RGBA4444 channel/nibble order,
+alpha expansion, 256-to-64 downsampling and malformed-length rejection. Desktop
+rendering uses OpenGL; final deko3d/hardware confirmation remains required.

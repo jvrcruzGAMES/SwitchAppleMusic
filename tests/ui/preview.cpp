@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
                         {"confirmation", "123-456"},
                         {"expires_in", 300},
                         {"matrix", matrix}});
-    } else if (scene == "collection" || scene == "long" || scene == "empty") {
+    } else if (scene == "collection" || scene == "long" || scene == "empty" || scene == "artwork-legacy" || scene == "artwork-retry") {
         library.browse("/v1/catalog/search?term=" + scene, "catalog", "Search results", false);
     } else if (scene == "player")
         library.playing();
@@ -51,17 +51,23 @@ int main(int argc, char **argv) {
                      {"artist", "The Northern Lights"}, {"album", "After Hours"},
                      {"artwork_path", "/v1/artwork/songs/100"}}}};
     // Layout frames also exercise the real XML parser, view factories and focus.
-    for (int i = 0; i < 90; ++i) {
+    auto artworkDeadline=Clock::now()+std::chrono::seconds(5);
+    for (int i = 0; i < 90 || (scene == "artwork-retry" && Clock::now()<artworkDeadline); ++i) {
         if (!brls::Application::mainLoop()) return 2;
         library.tick();
         if (scene == "player") library.updatePlaybackState(playback);
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        if(scene=="artwork-retry"&&i>=90){
+            auto* root=brls::Application::getCurrentFocus();while(root&&root->hasParent())root=root->getParent();
+            auto* image=root?dynamic_cast<brls::Image*>(root->getView("row/artwork")):nullptr;
+            if(image&&image->getTexture()>0)break;
+        }
     }
     assert(brls::Application::getCurrentFocus());
     auto *root = brls::Application::getCurrentFocus();
     while (root->hasParent())
         root = root->getParent();
-    if (scene == "collection" || scene == "long") {
+    if (scene == "collection" || scene == "long" || scene == "artwork-legacy" || scene == "artwork-retry") {
         auto *row = root->getView("item/0");
         assert(row);
         auto bounds = row->getFrame();
@@ -184,6 +190,16 @@ int main(int argc, char **argv) {
     dynamic_cast<brls::Label *>(root->getView("shell/status"))->setText("Preview · local artwork fixture");
     for (int i = 0; i < 3; ++i)
         assert(brls::Application::mainLoop());
+    if(scene=="player"||scene=="collection"||scene=="artwork-legacy"||scene=="artwork-retry"){
+        auto* image=root->getView(scene=="player"?"player/artwork":"row/artwork");assert(image);
+        auto bounds=image->getFrame();GLint viewport[4];glGetIntegerv(GL_VIEWPORT,viewport);
+        unsigned char pixel[3]{};glReadBuffer(GL_FRONT);glPixelStorei(GL_PACK_ALIGNMENT,1);
+        float scale=viewport[2]/1280.0f;
+        glReadPixels(int((bounds.getMinX()+bounds.getWidth()/2)*scale),
+                     viewport[3]-1-int((bounds.getMinY()+bounds.getHeight()/2)*scale),1,1,GL_RGB,GL_UNSIGNED_BYTE,pixel);
+        assert(std::abs(int(pixel[0])-51)<8&&std::abs(int(pixel[1])-170)<8&&std::abs(int(pixel[2])-187)<8);
+        std::cout<<"Artwork pixels verified in the rendered framebuffer"<<std::endl;
+    }
     if (argc > 3) {
         GLint viewport[4];
         glGetIntegerv(GL_VIEWPORT, viewport);

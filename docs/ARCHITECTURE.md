@@ -146,3 +146,14 @@ drains all tags and waits up to 100 ms for retained buffers. If ownership still
 cannot be recovered, it closes/reopens the audio service before reusing PCM and
 restores the default gain. Playback errors discard the failed output and decoder;
 the command worker stays alive and can initialize a fresh output for another song.
+
+App artwork uses backend RGBA4444 rather than its previous PNG-only path. 64-pixel
+thumbnails expand into 16 KiB RGBA8 cache entries (64 entries, 1 MiB maximum).
+Now Playing retains only its current 256-pixel texture. GPU uploads run on the
+render thread and explicitly refresh image paint bounds after setting the texture.
+A backend that only supports 256-pixel raw covers remains compatible through
+fallback/downsampling; the updated backend also serves 64-pixel raw covers.
+Failed downloads, invalid pixel data and texture-allocation failures receive at
+most three attempts with a two-second retry delay, and report the latest diagnostic
+to `config/switchmusic/artwork.log`. Missing covers still leave the music-note
+placeholder and do not prevent browsing or playback.

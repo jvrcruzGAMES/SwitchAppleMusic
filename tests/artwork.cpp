@@ -1,4 +1,5 @@
 #include <switchmusic/artwork.hpp>
+#include <switchmusic/artwork_pixels.hpp>
 #include <switchmusic/artwork_worker.hpp>
 #include <switchmusic/ipc.hpp>
 #include <curl/curl.h>
@@ -13,6 +14,16 @@ int main(int argc, char **argv) {
     std::vector<uint8_t> pixels(CoverBytes);
     for (size_t i = 0; i < pixels.size(); ++i)
         pixels[i] = i % 251;
+    auto rgba=artworkRGBA8(pixels,256,64);
+    assert(rgba.size()==64*64*4);
+    for(size_t y=0;y<64;++y)for(size_t x=0;x<64;++x){
+        auto source=(y*4*256+x*4)*2,target=(y*64+x)*4;
+        assert(rgba[target]==(pixels[source]>>4)*17);
+        assert(rgba[target+1]==(pixels[source]&15)*17);
+        assert(rgba[target+2]==(pixels[source+1]>>4)*17);
+        assert(rgba[target+3]==(pixels[source+1]&15)*17);
+    }
+    bool rejected=false;try{artworkRGBA8({1,2},64,64);}catch(const std::exception&){rejected=true;}assert(rejected);
     CoverReceiver image;
     image.begin("123");
     while (!image.complete()) {

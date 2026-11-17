@@ -30,7 +30,7 @@ def test_artwork_variants_cache_and_no_credentials_to_cdn(settings):
         assert len(calls)==3  # metadata once, two CDN sizes
         assert not client.app.state.artwork.bytes>8*1024*1024
         assert client.get('/v1/artwork/songs/123?size=1024').status_code==400
-        assert client.get('/v1/artwork/songs/123?size=64&format=rgba4444').status_code==400
+        assert len(client.get('/v1/artwork/songs/123?size=64&format=rgba4444').content)==64*64*2
 
 def test_normalized_artwork_is_backend_relative():
     result=normalize({'id':'123','type':'songs','attributes':{'name':'Title','artwork':{'url':'https://private.example/template'}}})

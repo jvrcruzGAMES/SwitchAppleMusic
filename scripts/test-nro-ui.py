@@ -25,7 +25,14 @@ class Backend(http.server.BaseHTTPRequestHandler):
     def log_message(self,*args):pass
     def do_GET(self):
         if self.path.startswith('/v1/artwork/'):
-            raw=thumbnail();self.send_response(200);self.send_header('Content-Type','image/png');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
+            query=parse_qs(urlsplit(self.path).query);size=int(query.get('size',['64'])[0])
+            if query.get('format')==['rgba4444']:
+                if getattr(self.server,'legacy_artwork',False) and size==64:self.send_error(400);return
+                if getattr(self.server,'corrupt_once',False):
+                    self.server.corrupt_once=False;raw=b'bad-pixels'
+                else:raw=bytes([0x3a,0xbf])*(size*size)
+            else:raw=thumbnail()
+            self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path=='/auth/me':payload={'user':{'username':'demo','apple_linked':True},'csrf':'synthetic-csrf'}
         elif self.path.startswith('/v1/lyrics/'):
             payload={'provider':'syncedlyrics','lines':[{'time_ms':0,'text':'A little closer to the music'},
@@ -44,7 +51,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary',type=Path,required=True)
     parser.add_argument('--screenshots',type=Path)
-    scenes=('home','login','guest','search','settings','qr','collection','long','empty','player','navigation')
+    scenes=('home','login','guest','search','settings','qr','collection','long','empty','player','navigation','artwork-legacy','artwork-retry')
     parser.add_argument('--scene',choices=scenes)
     args=parser.parse_args();binary=args.binary.resolve()
     output=args.screenshots.resolve() if args.screenshots else None
@@ -54,6 +61,8 @@ def main():
         try:
             environment={**os.environ,'SWITCHMUSIC_UI_BACKEND':f'http://127.0.0.1:{server.server_port}'}
             for scene in ((args.scene,) if args.scene else scenes):
+                server.legacy_artwork=scene=='artwork-legacy'
+                server.corrupt_once=scene=='artwork-retry'
                 command=[str(binary),scene,'1']
                 if output:command.append(str(output/(scene+'.ppm')))
                 result=subprocess.run(command,cwd=directory,env=environment,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=40)

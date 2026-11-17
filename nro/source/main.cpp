@@ -1,5 +1,6 @@
 #include <borealis.hpp>
 #include <switchmusic/client.hpp>
+#include <switchmusic/artwork_pixels.hpp>
 #include <curl/curl.h>
 #ifdef __SWITCH__
 #include <switch.h>
@@ -16,6 +17,7 @@
 #include <chrono>
 #include <sys/stat.h>
 #include <cmath>
+#include <fstream>
 using namespace smusic;
 using Clock = std::chrono::steady_clock;
 static std::string pageBase(std::string path) {
@@ -214,10 +216,17 @@ class Network {
                 if (job.type == "login")
                     result = signIn(active, job.request.at("password"));
                 else if (job.type == "artwork") {
-                    auto bytes = apiBytes(active, job.path, 256 * 1024, [this, epoch = job.generation] {
-                        return artworkGeneration.load() != epoch;
-                    });
-                    result = {{"bytes", Json::binary(std::move(bytes))}};
+                    auto cancelled = [this, epoch = job.generation] {return artworkGeneration.load() != epoch;};
+                    unsigned target=job.path.find("?size=64&")!=std::string::npos?64:256, source=target;
+                    std::vector<uint8_t> bytes;
+                    try{bytes=apiBytes(active,job.path,256*256*2,cancelled);}
+                    catch(const HttpError& e){
+                        // Older backends expose only the overlay's 256px raw variant.
+                        if(target!=64||e.status!=400)throw;
+                        auto path=job.path;path.replace(path.find("?size=64&"),9,"?size=256&");
+                        bytes=apiBytes(active,path,256*256*2,cancelled);source=256;
+                    }
+                    result = {{"bytes", Json::binary(artworkRGBA8(bytes,source,target))},{"size",target}};
                 } else if (job.type == "logout") {
                     signOut(active);
                     result = Json::object();
@@ -284,6 +293,8 @@ class Library {
     std::unordered_map<std::string, std::shared_ptr<std::vector<uint8_t>>> artworkCache;
     std::deque<std::string> artworkQueue, artworkLRU;
     bool artworkPending = false;
+    std::unordered_map<std::string,unsigned> artworkAttempts;
+    Clock::time_point artworkRetry{};
     std::function<void()> navigation;
     template <class T = brls::View> static T *view(brls::View *root, const std::string &id) {
         auto *found = dynamic_cast<T *>(root->getView(id));
@@ -292,6 +303,21 @@ class Library {
     }
     static brls::View *xml(const std::string &name) {
         return brls::View::createFromXMLResource("switchmusic/" + name + ".xml");
+    }
+    static void setArtwork(brls::Image* image,const std::vector<uint8_t>& pixels,unsigned size){
+        if((size!=64&&size!=256)||pixels.size()!=size_t(size)*size*4)throw std::runtime_error("Invalid artwork RGBA data");
+        int texture=nvgCreateImageRGBA(brls::Application::getNVGContext(),size,size,0,pixels.data());
+        if(texture<=0)throw std::runtime_error("Cannot allocate artwork texture");
+        image->innerSetImage(texture);
+        // Fixed-size absolute image views must rebuild their paint after an
+        // async upload, even when Yoga has no new dimensions to lay out.
+        image->onLayout();
+    }
+    void artworkError(const std::string& path,const std::string& reason){
+        brls::Logger::warning("Artwork {}: {}",path,reason);
+        std::ofstream log("sdmc:/config/switchmusic/artwork.log",std::ios::trunc);
+        log<<path<<"\n"<<reason<<"\n";
+        if(artworkViews.count(path)&&++artworkAttempts[path]<3){artworkQueue.push_back(path);artworkRetry=Clock::now()+std::chrono::seconds(2);}
     }
     void text(const std::string &id, const std::string &value) {
         view<brls::Label>(page, id)->setText(value);
@@ -322,6 +348,7 @@ class Library {
         playerArtworkPath.clear();
         artworkViews.clear();
         artworkQueue.clear();
+        artworkAttempts.clear();artworkRetry={};
         artworkPending = false;
         net.cancelArtwork(generation);
         pendingFocus = nullptr;
@@ -782,12 +809,13 @@ class Library {
             view<brls::Label>(entry, "row/index")->setText(std::to_string(i + 1));
             auto artwork = item.value("artwork_path", std::string{});
             if (artwork.rfind("/v1/artwork/", 0) == 0) {
-                auto path = artwork + "?size=64";
+                auto path = artwork + "?size=64&format=rgba4444";
                 auto *image = view<brls::Image>(entry, "row/artwork");
                 auto key = config.backend + "\n" + config.session + "\n" + path;
                 auto cached = artworkCache.find(key);
                 if (cached != artworkCache.end()) {
-                    image->setImageFromMem(cached->second->data(), cached->second->size());
+                    try{setArtwork(image,*cached->second,64);}
+                    catch(const std::exception& e){artworkViews[path].push_back(image);artworkError(path,e.what());}
                     artworkLRU.erase(std::remove(artworkLRU.begin(), artworkLRU.end(), key),
                                      artworkLRU.end());
                     artworkLRU.push_back(key);
@@ -920,9 +948,10 @@ class Library {
         view<TransportIcon>(page, "player/toggle/icon")->setPlaying(
             !id.empty() && !state.value("paused", false) && state.value("status", std::string{}) != "stopped");
         auto artwork = song.value("artwork_path", std::string{});
-        auto path = artwork.rfind("/v1/artwork/", 0) == 0 ? artwork + "?size=256" : std::string{};
+        auto path = artwork.rfind("/v1/artwork/", 0) == 0 ? artwork + "?size=256&format=rgba4444" : std::string{};
         if (path != playerArtworkPath) {
             playerArtworkPath = path;
+            artworkAttempts.clear();artworkRetry={};
             auto* image = view<brls::Image>(page, "player/artwork");
             image->clear();
             artworkViews.clear();
@@ -1010,20 +1039,18 @@ class Library {
                     auto &bytes = result["bytes"].get_binary();
                     auto cached = std::make_shared<std::vector<uint8_t>>(bytes.begin(), bytes.end());
                     auto found = artworkViews.find(job.path);
-                    if (found != artworkViews.end())
-                        for (auto *image : found->second)
-                            image->setImageFromMem(cached->data(), cached->size());
-                    // Keep only the current full-size cover texture. The shared
-                    // 64-entry compressed cache is reserved for small row art.
-                    if (job.path.find("?size=64") == std::string::npos) continue;
+                    try{
+                        if(found!=artworkViews.end())for(auto* image:found->second)setArtwork(image,*cached,result.at("size").get<unsigned>());
+                    }catch(const std::exception& e){artworkError(job.path,e.what());continue;}
+                    artworkAttempts.erase(job.path);
+                    // Cache only small RGBA thumbnails (64 entries = 1 MiB).
+                    if (job.path.find("?size=64&") == std::string::npos) continue;
                     auto key = config.backend + "\n" + config.session + "\n" + job.path;
                     artworkCache[key] = std::move(cached);
+                    artworkLRU.erase(std::remove(artworkLRU.begin(),artworkLRU.end(),key),artworkLRU.end());
                     artworkLRU.push_back(key);
-                    while (artworkLRU.size() > 64) {
-                        artworkCache.erase(artworkLRU.front());
-                        artworkLRU.pop_front();
-                    }
-                }
+                    while (artworkLRU.size() > 64) {artworkCache.erase(artworkLRU.front());artworkLRU.pop_front();}
+                }else artworkError(job.path,result.value("error",std::string("No artwork pixels received")));
                 continue;
             }
             if (job.type == "settings" || job.type == "qr_start" || job.type == "qr_status") {
@@ -1082,7 +1109,7 @@ class Library {
                 renderState();
             }
         }
-        if (!artworkPending && !artworkQueue.empty()) {
+        if (!artworkPending && !artworkQueue.empty() && Clock::now()>=artworkRetry) {
             auto path = artworkQueue.front();
             if (net.submit({"artwork", path, {}, generation})) {
                 artworkPending = true;

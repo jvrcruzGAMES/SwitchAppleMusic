@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <limits>
 #include <cctype>
+#include <chrono>
+#include <thread>
 extern "C" {
 #include <libavformat/avio.h>
 #include <libavutil/error.h>
@@ -13,6 +15,9 @@ extern "C" {
 namespace smusic {
 namespace {
 constexpr size_t BlockSize = 256 * 1024;
+class ConnectionFailure : public std::runtime_error {
+public: using std::runtime_error::runtime_error;
+};
 bool safePath(const std::string &path) {
     return path.rfind("/v1/", 0) == 0 && path.find_first_of("\r\n#") == std::string::npos &&
            path.substr(0, path.find('?')).find("..") == std::string::npos;
@@ -24,7 +29,7 @@ struct HttpInput::Impl {
     CURL *curl = nullptr;
     CURLM *multi = nullptr;
     curl_slist *requestHeaders = nullptr;
-    bool active = false;
+    bool active = false, forceFresh = false;
     int64_t streamNext = -1;
     std::array<char, CURL_ERROR_SIZE> transportDetail{};
     std::array<uint8_t, BlockSize> block{};
@@ -152,7 +157,7 @@ struct HttpInput::Impl {
             return 1;
         }
     }
-    long get(const std::string &resource, uint8_t *data, size_t limit, const std::string &range = "",
+    long getOnce(const std::string &resource, uint8_t *data, size_t limit, const std::string &range = "",
              std::string *text = nullptr) {
         if (!safePath(resource))
             throw std::runtime_error("Invalid playback path");
@@ -176,6 +181,7 @@ struct HttpInput::Impl {
             replyEtag.clear();
             responseStatus = 0;
             curl_easy_reset(curl);
+            if(forceFresh){curl_easy_setopt(curl,CURLOPT_FRESH_CONNECT,1L);curl_easy_setopt(curl,CURLOPT_DNS_CACHE_TIMEOUT,0L);forceFresh=false;}
             transportDetail.fill(0);
             auto url = config.backend + resource;
             curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, transportDetail.data());
@@ -256,14 +262,33 @@ struct HttpInput::Impl {
             throw std::bad_alloc();
         if (invalidRange)
             throw std::runtime_error("Invalid playback Content-Range at " + resource);
-        if (rc != CURLE_OK)
-            throw std::runtime_error(
-                "Playback transport: " + std::string(curl_easy_strerror(rc)) +
-                (transportDetail[0] ? " (" + std::string(transportDetail.data()) + ")" : "") + " at " +
-                resource);
+        if (rc != CURLE_OK){
+            auto message="Playback transport: " + std::string(curl_easy_strerror(rc)) +
+                (transportDetail[0] ? " (" + std::string(transportDetail.data()) + ")" : "") + " at " + resource;
+            if(status==0&&written==0&&(rc==CURLE_COULDNT_CONNECT||rc==CURLE_COULDNT_RESOLVE_HOST||rc==CURLE_OPERATION_TIMEDOUT))
+                throw ConnectionFailure(message);
+            throw std::runtime_error(message);
+        }
         if (status != 200 && status != 206)
             throw std::runtime_error("Playback server returned no HTTP response at " + resource);
         return status;
+    }
+    long get(const std::string& resource,uint8_t* data,size_t limit,const std::string& range="",std::string* text=nullptr){
+        // Retry only failures before a response/body. Never replay a partially
+        // consumed stream or hide HTTP/authentication/TLS/data errors.
+        for(unsigned attempt=0;;++attempt){
+            try{return getOnce(resource,data,limit,range,text);}
+            catch(const ConnectionFailure&){
+                if(attempt==4)throw;
+                stopTransfer();
+                forceFresh=true;
+                auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(std::min(1000u<<attempt,4000u));
+                while(std::chrono::steady_clock::now()<until){
+                    if(cancel&&cancel())throw Cancelled();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                }
+            }
+        }
     }
     void fetch(int64_t offset) {
         size_t wanted = total >= 0 ? size_t(std::min<int64_t>(BlockSize, total - offset)) : BlockSize;

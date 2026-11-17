@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import tempfile
 import threading
+import time
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -23,7 +24,16 @@ class Server(http.server.BaseHTTPRequestHandler):
             self.send_error(401);return
         if self.path=='/v1/large-metadata':
             raw=b'x'*(600*1024);self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
-        if self.path=='/v1/unavailable':self.send_error(503);return
+        if self.path=='/v1/recover':
+            raw=b'online';self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
+        if self.path in ('/v1/stream/recover','/v1/stream/partial'):
+            size=65536;self.send_response(206);self.send_header('Content-Range',f'bytes 0-{size-1}/{size}');self.send_header('Content-Length',str(size));self.end_headers()
+            raw=bytes(i%251 for i in range(size))
+            if self.path.endswith('/partial'):
+                self.server.partial_requests+=1;self.wfile.write(raw[:8192]);self.close_connection=True;self.connection.shutdown(socket.SHUT_RDWR);self.connection.close()
+            else:self.wfile.write(raw)
+            return
+        if self.path=='/v1/unavailable':self.server.unavailable_requests+=1;self.send_error(503);return
         if self.path=='/v1/disconnect':
             self.close_connection=True;self.connection.shutdown(socket.SHUT_RDWR);self.connection.close();return
         if self.path=='/v1/stream/large':
@@ -75,6 +85,22 @@ def compare(actual,reference,label):
     difference=max((abs(x-y) for x,y in zip(a,b)),default=0)
     assert difference<=1,(label,difference)
 
+def check_reconnect(binary):
+    for mode in ('text','range','cancel','refused'):
+        locked=socket.socket();locked.bind(('127.0.0.1',0));port=locked.getsockname()[1]
+        server=http.server.ThreadingHTTPServer(('127.0.0.1',port),Server,bind_and_activate=False)
+        ready=threading.Event();thread=None
+        if mode in ('text','range'):
+            def late_start():
+                time.sleep(.5);locked.close();server.server_bind();server.server_activate();ready.set();server.serve_forever()
+            thread=threading.Thread(target=late_start,daemon=True);thread.start()
+        try:
+            run([binary,f'http://127.0.0.1:{port}','--reconnect-'+mode],timeout=20)
+        finally:
+            if thread:
+                assert ready.wait(2),'Delayed server did not start';server.shutdown();thread.join()
+            locked.close();server.server_close()
+
 def main():
     prefix=ROOT/'build-ffmpeg/host';out=ROOT/'build-ffmpeg/player-tests';out.mkdir(parents=True,exist_ok=True);binary=out/'player'
     curl=shlex.split(subprocess.check_output(['pkg-config','--cflags','--libs','libcurl'],text=True))
@@ -83,6 +109,7 @@ def main():
     run(['c++','-std=c++17','-O2','-I'+str(ROOT/'common/include'),'-I'+str(ROOT/'sysmodule/include'),'-I'+str(ROOT/'third_party/json'),'-I'+str(prefix/'include'),
          ROOT/'tests/audio/player.cpp',ROOT/'sysmodule/source/audio_decoder.cpp',ROOT/'sysmodule/source/http_input.cpp',ROOT/'common/src/client.cpp',
          prefix/'lib/libavformat.a',prefix/'lib/libavcodec.a',prefix/'lib/libswresample.a',prefix/'lib/libavutil.a',*curl,guard,'-Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free,--wrap=posix_memalign,--wrap=aligned_alloc','-lm','-pthread','-o',binary])
+    check_reconnect(binary)
     with tempfile.TemporaryDirectory(prefix='switchmusic-player-') as temporary:
         work=Path(temporary)
         with http.server.ThreadingHTTPServer(('127.0.0.1',0),Server) as server:
@@ -113,9 +140,10 @@ def main():
                     run([binary,url,'/v1/playback/'+fixture+'.m3u8',actual,seeked,middle])
                     reference.write_bytes(full);compare(actual,reference,fixture)
                     print(fixture+': streamed playback passed')
-                server.chunked_requests=0
+                server.chunked_requests=0;server.unavailable_requests=0;server.partial_requests=0
                 run([binary,url,'--http-checks'])
                 assert server.chunked_requests==2,server.chunked_requests
+                assert server.unavailable_requests==1 and server.partial_requests==1
                 for fixture in ['external','expired','changed','encrypted']:
                     result=subprocess.run([str(binary),url,'/v1/playback/'+fixture+'.m3u8',str(actual),str(seeked),str(middle)],capture_output=True)
                     assert result.returncode!=0,fixture

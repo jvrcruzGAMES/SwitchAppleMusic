@@ -79,3 +79,13 @@ worker and stale-track rejection. The overlay renderer fixture checks all five
 strings, vertical slots and current-line emphasis. NRO pixel/layout tests verify
 all five label contents and non-overlap. Overlay R/L switching and physical slider
 input still require Switch acceptance testing.
+
+Network-request tests execute the production NIFM lease with a host service double:
+pending/available requests stay open across idle polling, errors retry with backoff,
+initialization failure is recoverable, and shutdown closes its resources. Production
+HTTP tests begin with a bound-but-not-listening port, start the backend later, and
+verify both manifest/metadata and range requests recover. They also check prompt
+cancellation, a finite retry budget, and that HTTP 503/partial responses are not
+replayed. The complete AAC/AAC-web/ALAC PCM, seek, chunked fallback and cancellation
+suite runs against the updated transport. On Switch, verify Stop → wait → Play while
+the NRO/overlay remain open, plus reconnect after a genuine Wi-Fi interruption.

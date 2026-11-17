@@ -4,9 +4,28 @@
 #include <cstdio>
 #include <iostream>
 #include <cassert>
+#include <chrono>
 using namespace smusic;
 int main(int argc,char** argv){
     curl_global_init(CURL_GLOBAL_DEFAULT);
+    if(argc==3&&std::string(argv[2]).rfind("--reconnect-",0)==0){
+        Config config{argv[1],"admin",std::string(43,'a')};std::string mode=argv[2];
+        auto start=std::chrono::steady_clock::now();
+        HttpInput input(config,[&]{return mode=="--reconnect-cancel"&&std::chrono::steady_clock::now()-start>std::chrono::milliseconds(100);});
+        if(mode=="--reconnect-text")assert(input.text("/v1/recover")=="online");
+        else if(mode=="--reconnect-range"){
+            input.open("/v1/stream/recover",65536);std::array<uint8_t,4096> data;
+            assert(input.read(data.data(),data.size())==int(data.size()));for(unsigned i=0;i<data.size();++i)assert(data[i]==i%251);
+        }else if(mode=="--reconnect-cancel"){
+            bool cancelled=false;try{input.text("/v1/recover");}catch(const Cancelled&){cancelled=true;}assert(cancelled);
+            assert(std::chrono::steady_clock::now()-start<std::chrono::seconds(1));
+        }else{
+            bool failed=false;try{input.text("/v1/recover");}catch(const std::exception& e){failed=std::string(e.what()).find("Playback transport:")!=std::string::npos;}assert(failed);
+            auto elapsed=std::chrono::steady_clock::now()-start;
+            assert(elapsed>=std::chrono::milliseconds(10500)&&elapsed<std::chrono::seconds(20));
+        }
+        std::cout<<mode<<": passed\n";return 0;
+    }
     if(argc==3&&std::string(argv[2])=="--http-checks"){
         Config config{argv[1],"admin",std::string(43,'a')};
         HttpInput input(config);
@@ -30,6 +49,7 @@ int main(int argc,char** argv){
         for(size_t i=0;i<bytes.size();++i)assert(bytes[i]==(400*1024+i)%251);
         bool reported=false;try{input.text("/v1/unavailable");}catch(const HttpError& error){reported=error.status==503;}assert(reported);
         reported=false;try{input.text("/v1/disconnect");}catch(const std::exception& error){reported=std::string(error.what()).find("Playback transport:")!=std::string::npos;}assert(reported);
+        reported=false;try{input.open("/v1/stream/partial",65536);}catch(const std::exception& error){reported=std::string(error.what()).find("Playback transport:")!=std::string::npos;}assert(reported);
         std::cout<<"Large metadata, 3 GiB media seeks, chunked full-response fallback and precise transport errors passed\n";
         return 0;
     }

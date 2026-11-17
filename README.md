@@ -17,6 +17,8 @@ The NRO browses your library songs, albums, playlists, and their tracks. Selecti
 
 The player supports **AAC, AAC-web and ALAC**, with Atmos/AC-3 excluded. The actual sysmodule has approximately **12.05 MB of page-aligned loadable code/data/BSS**, including its reserved **8 MiB heap**. With an additional 4 MiB platform allowance, the planning total is approximately **16.25 MB**, below the **22 MB goal** and **36.6 MB maximum**. This is a linked-image calculation, not a measured hardware runtime peak. Packaging enforces the planning goal and includes `SwitchMusic-memory.json`.
 
+The sysmodule keeps its own background network-manager request while enabled, including after Stop, and retries connection setup during short outages. Clients can remain open while it reconnects.
+
 Audio stays off the SD card. The backend provides a single-file, byte-range fMP4 M3U8; custom FFmpeg AVIO reads it through a bounded 256 KiB HTTP range cache and supports remote seeking. A 64 KiB PCM pool feeds Horizon audio output. See [the player, transport and memory details](docs/AUDIO_FFMPEG.md).
 
 ```sh

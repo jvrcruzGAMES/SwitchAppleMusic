@@ -7,6 +7,7 @@
 #include <switchmusic/audio_output.hpp>
 #include <switchmusic/playback_queue.hpp>
 #include <switchmusic/lyrics_worker.hpp>
+#include <switchmusic/network_lease.hpp>
 #include <curl/curl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -48,6 +49,7 @@ void __appInit() {
 void __appExit() {if(controlPortRegistered){smUnregisterService(smEncodeName(ControlServiceName));}romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
 }
 class Player {
+    NetworkLease network;Result lastNetworkResult=0;
     ArtworkWorker artwork;LyricsWorker lyrics;
     Config config;std::mutex lock;std::deque<Json> commands;
     Json state={{"status","stopped"},{"position",0.0},{"duration",0.0},{"paused",false},{"shuffle",false},{"repeat","off"},{"volume",80.0}};
@@ -58,7 +60,14 @@ class Player {
     bool paused=false,draining=false,started=false;double resumePosition=0;
     std::chrono::steady_clock::time_point lastCredentials{};
     void update(Json values){std::lock_guard guard(lock);state.update(values);}
+    void pollNetwork(){
+        Result rc=network.poll();
+        if(rc!=lastNetworkResult){lastNetworkResult=rc;
+            if(R_FAILED(rc)){char code[64];std::snprintf(code,sizeof(code),"NIFM request: 0x%08x",unsigned(R_VALUE(rc)));std::ofstream("sdmc:/config/switchmusic/network.log")<<code;}
+        }
+    }
     bool cancelled(){
+        pollNetwork();
         if(shuttingDown.load()||revision.load()!=operation)return true;
         auto now=std::chrono::steady_clock::now();
         if(now-lastCredentials>std::chrono::seconds(1)){
@@ -152,6 +161,7 @@ public:
             while(!shuttingDown.load()){
                 Json next;{std::lock_guard guard(lock);if(!commands.empty()){next=std::move(commands.front());commands.pop_front();}}
                 try{
+                    pollNetwork();
                     auto now=std::chrono::steady_clock::now();
                     if(!next.is_null()||now-lastConfig>std::chrono::seconds(1)){syncConfig();lastConfig=now;}
                     if(!output&&!next.is_null()){output=std::make_unique<AudioOutput>();output->volume(config.volume);}

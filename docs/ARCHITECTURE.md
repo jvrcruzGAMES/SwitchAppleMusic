@@ -176,3 +176,20 @@ validates timestamp order and retains only the current song. HTTP work is outsid
 IPC/audio threads, while `op: lyrics` returns just the five visible strings. Track
 or account changes cancel stale work. The NRO retains its existing backend lyric
 fetch and shares the same timing function. No backend changes are required.
+
+The sysmodule owns a persistent `nifm:s` network request for its process lifetime,
+including stopped/idle playback. BSD socket initialization alone does not create
+that request. The playback worker polls it without blocking IPC: pending requests
+stay open, failed requests are recreated with a five-second backoff, and normal
+module shutdown cancels/closes the request before exiting NIFM. The same poll runs
+inside transport cancellation callbacks while network operations are active. No
+extra thread, network heartbeat, radio toggle or sleep override is used. See the
+[libnx NIFM request API](https://github.com/switchbrew/libnx/blob/master/nx/source/services/nifm.c).
+The most recent NIFM failure code is recorded in `config/switchmusic/network.log`.
+
+Playback GETs make at most five attempts after DNS/connect failures or pre-response
+timeouts, with cancellable 1/2/4/4-second backoff. Retries use a fresh connection and
+DNS lookup; existing 10-second connection timeouts remain. Stop/skip/account changes
+can cancel both transfers and backoff. HTTP errors, TLS errors and partially received
+responses are not retried, preserving authorization and range/integrity checks.
+Successful requests incur no retry delay and audio buffering remains unchanged.

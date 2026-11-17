@@ -56,6 +56,7 @@ class PlayerPanel : public tsl::elm::Element {
     void drawFocusBackground(tsl::gfx::Renderer *) override {}
     void drawHighlight(tsl::gfx::Renderer *) override {}
     bool onClick(u64 keys) override {
+        if(keys&(HidNpadButton_L|HidNpadButton_R))return false;
         if (keys & HidNpadButton_Left) {
             selected = (selected + 2) % 3;
             return true;
@@ -66,10 +67,6 @@ class PlayerPanel : public tsl::elm::Element {
         }
         if (keys & HidNpadButton_A) {
             activate();
-            return true;
-        }
-        if (keys & HidNpadButton_L) {
-            command({{"op", "previous"}});
             return true;
         }
         if (keys & HidNpadButton_Y) {
@@ -167,6 +164,7 @@ class Controls : public tsl::Gui {
     tsl::elm::ListItem* add(tsl::elm::List *list, const std::string &text, std::function<Json()> action) {
         auto *item = new tsl::elm::ListItem(text);
         item->setClickListener([this, action](u64 keys) {
+            if(keys&(HidNpadButton_L|HidNpadButton_R))return false;
             if (keys & HidNpadButton_A) {
                 command(action());
                 return true;
@@ -194,6 +192,7 @@ class Controls : public tsl::Gui {
     }
     bool handleInput(u64 keys,u64,const HidTouchState&,HidAnalogStickState,HidAnalogStickState)override{
         if(keys&HidNpadButton_R){if(configured)tsl::changeTo<OverlayLyricsScreen>(config);return true;}
+        if(keys&HidNpadButton_L)return true;
         return false;
     }
     void update() override {

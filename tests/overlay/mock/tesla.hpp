@@ -5,7 +5,7 @@
 #include <vector>
 using u16=uint16_t;using u64=uint64_t;using s32=int32_t;
 struct HidTouchState{};struct HidAnalogStickState{};
-constexpr u64 HidNpadButton_L=16,HidNpadButton_Y=32;
+constexpr u64 HidNpadButton_L=16,HidNpadButton_Y=32,HidNpadButton_R=64;
 constexpr u64 HidNpadButton_Left=1,HidNpadButton_Right=2,HidNpadButton_A=4,HidNpadButton_B=8;
 namespace tsl{
 enum class FocusDirection{None,Up,Down};

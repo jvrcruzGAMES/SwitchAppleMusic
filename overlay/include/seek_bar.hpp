@@ -30,6 +30,7 @@ public:
     void setFocused(bool focused)override{tsl::elm::Element::setFocused(focused);if(!focused)preview.reset();}
     void layout(u16,u16,u16,u16)override{setBoundaries(getX(),getY(),getWidth(),88);}
     bool onClick(u64 keys)override{
+        if(keys&(HidNpadButton_L|HidNpadButton_R))return false;
         if(keys&(HidNpadButton_Left|HidNpadButton_Right)){
             if(duration>0)preview=std::clamp(displayedPosition()+((keys&HidNpadButton_Right)?5:-5),0.0,duration);
             return true;

@@ -7,6 +7,8 @@ int main(){
  smusic::OverlaySeekBar bar([&](double value){sent.push_back(value);});
  bar.setBoundaries(10,20,400,88);bar.setFocused(true);bar.setState(50,100,"a");
  assert(bar.requestFocus(nullptr,tsl::FocusDirection::Down)==&bar);
+ assert(!bar.onClick(HidNpadButton_L|HidNpadButton_Right)&&bar.displayedPosition()==50);
+ assert(!bar.onClick(HidNpadButton_R|HidNpadButton_A)&&sent.empty());
  assert(bar.onClick(HidNpadButton_Right)&&bar.displayedPosition()==55&&sent.empty());
  bar.setState(52,100,"a");assert(bar.displayedPosition()==55);
  assert(bar.onClick(HidNpadButton_A)&&sent.size()==1&&sent.back()==55);

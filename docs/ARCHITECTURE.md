@@ -193,3 +193,9 @@ DNS lookup; existing 10-second connection timeouts remain. Stop/skip/account cha
 can cancel both transfers and backoff. HTTP errors, TLS errors and partially received
 responses are not retried, preserving authorization and range/integrity checks.
 Successful requests incur no retry delay and audio buffering remains unchanged.
+
+Overlay L/R are reserved exclusively for lyric navigation: R opens lyrics from the
+player, L returns from lyrics, and the other shoulder is consumed without an action
+on each page. Transport, seek and list-item handlers defer shoulder combinations
+before executing commands. Previous/Next remain available as icon buttons. The
+sysmodule receives IPC commands only and does not initialize or poll HID buttons.

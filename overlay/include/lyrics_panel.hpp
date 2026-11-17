@@ -49,6 +49,7 @@ public:
     }
     bool handleInput(u64 keys,u64,const HidTouchState&,HidAnalogStickState,HidAnalogStickState)override{
         if(keys&HidNpadButton_L){tsl::goBack();return true;}
+        if(keys&HidNpadButton_R)return true;
         if(keys&HidNpadButton_Y){control(config,{{"op","toggle"}});return true;}
         return false;
     }

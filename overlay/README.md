@@ -6,8 +6,8 @@ with an original large-cover layout. A centered 256-pixel cover sits above track
 metadata, progress and Previous / Play-Pause / Next vector icon buttons.
 
 - Left/Right selects a transport button; A activates it.
-- L/R skips directly; Y toggles playback.
-- Down moves to the seek, volume and stop controls below the player.
+- R opens synced lyrics; L returns to the player. These shoulder buttons have no playback action. Y toggles playback.
+- Down moves to the seek bar, shuffle, repeat and stop controls below the player. Volume is adjusted in NRO Settings only.
 - The transport buttons also accept touch taps.
 
 The overlay remains IPC-only. The sysmodule prepares the current cover on a
@@ -17,7 +17,7 @@ IPC message limit. It retains one 128 KiB cover buffer, reused on track changes.
 Missing art leaves a music-note placeholder. Account/track changes clear stale
 covers, and a failed image fetch does not stop audio.
 
-The NRO has a separate bounded PNG thumbnail cache. The overlay does not read
+The NRO has a separate bounded RGBA thumbnail cache. The overlay does not read
 client credentials for a network connection and does not initialize sockets.
 Both still use the saved backend session to authorize their IPC commands.
 

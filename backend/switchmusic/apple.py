@@ -98,13 +98,23 @@ class Apple:
 
     async def catalog_song(self, kind, song_id):
         if kind == "library-songs":
-            p = await self.get("me/library/songs/" + song_id + "/catalog")
-        else:
-            p = await self.get("catalog/" + self.storefront + "/songs/" + song_id)
-        data = p.get("data", [])
+            # Only this mapping uses the linked account. Playback must use a
+            # public song, since the wrapper can belong to a different account.
+            mapping = await self.get("me/library/songs/" + song_id + "/catalog")
+            matches = mapping.get("data", [])
+            if not matches:
+                raise HTTPException(422, "This library upload has no playable catalog match")
+            song_id = matches[0].get("id", "")
+        if not isinstance(song_id, str) or not re.fullmatch(r"[0-9]{1,20}", song_id):
+            raise HTTPException(422, "Expected a public catalog song ID")
+        payload = await self.get("catalog/" + self.storefront + "/songs/" + song_id)
+        data = payload.get("data", [])
         if not data:
-            raise HTTPException(422, "This library upload has no playable catalog match")
-        return data[0]
+            raise HTTPException(422, "This song has no playable catalog match")
+        song = data[0]
+        if song.get("type") != "songs" or song.get("id") != song_id:
+            raise HTTPException(502, "Apple Music returned an invalid public catalog song")
+        return song
 
     async def catalog_page(self, kind, resource_id, offset):
         payload=await self.get("catalog/"+self.storefront+"/"+kind+"/"+resource_id+"/tracks",limit=100,offset=offset)

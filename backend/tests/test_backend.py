@@ -179,3 +179,35 @@ def test_route_prefers_apple_lyrics(client, monkeypatch):
     response=client.get('/v1/lyrics/123',headers=HEADERS)
     assert response.status_code==200
     assert response.json()=={'provider':'apple-music','copyright':'','tracking_url':'','lines':[{'time_ms':1250,'text':'Apple line'}]}
+
+
+def test_library_resolution_fetches_individual_public_track(settings):
+    calls=[]
+    def upstream(request):
+        calls.append(request.url.path)
+        if request.url.path=='/v1/me/library/songs/i.local/catalog':
+            assert request.headers['Music-User-Token']=='LINKED_ACCOUNT'
+            # Mapping data must not be reused as the playback metadata.
+            return httpx.Response(200,json={'data':[{**SONG,'attributes':{'name':'Library mapping'}}]})
+        assert request.url.path=='/v1/catalog/us/songs/123'
+        assert 'Music-User-Token' not in request.headers
+        return httpx.Response(200,json={'data':[SONG]})
+    with TestClient(create_app(settings,httpx.MockTransport(upstream))) as client:
+        client.app.state.accounts.link(1,'LINKED_ACCOUNT','us')
+        response=client.get('/v1/resolve/library-songs/i.local',headers=HEADERS)
+        assert response.status_code==200,response.text
+        assert response.json()['title']=='Song'
+        assert response.json()['type']=='songs'
+        assert response.json()['playback_path']=='/v1/playback/123.m3u8'
+        assert response.json()['stream_path']=='/v1/stream/123'
+    assert calls==['/v1/me/library/songs/i.local/catalog','/v1/catalog/us/songs/123']
+
+@pytest.mark.parametrize('matches',[[],[{'id':'i.local','type':'library-songs'}]])
+def test_unmapped_library_song_never_reaches_playback(settings,matches):
+    def upstream(request):
+        assert request.url.path=='/v1/me/library/songs/i.local/catalog'
+        return httpx.Response(200,json={'data':matches})
+    with TestClient(create_app(settings,httpx.MockTransport(upstream))) as client:
+        client.app.state.accounts.link(1,'LINKED_ACCOUNT','us')
+        assert client.get('/v1/resolve/library-songs/i.local',headers=HEADERS).status_code==422
+        assert not list(settings.cache_dir.iterdir())

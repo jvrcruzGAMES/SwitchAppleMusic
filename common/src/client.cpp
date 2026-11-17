@@ -9,9 +9,11 @@
 #include <fcntl.h>
 #include <cerrno>
 #include <algorithm>
+#include <cmath>
 namespace smusic {
 Json error(const std::string& message) { return {{"error", message}}; }
 void Config::validate(bool requireSession) {
+    if(!std::isfinite(volume)||volume<0||volume>100)throw std::runtime_error("Volume must be between 0 and 100");
     while (!backend.empty() && backend.back()=='/') backend.pop_back();
     std::unique_ptr<CURLU,decltype(&curl_url_cleanup)> url(curl_url(),curl_url_cleanup);
     if(!url || backend.size()>1024 || std::any_of(backend.begin(),backend.end(),[](unsigned char c){return c<=32||c==127;}) || curl_url_set(url.get(),CURLUPART_URL,backend.c_str(),0)!=CURLUE_OK)
@@ -29,12 +31,12 @@ void Config::validate(bool requireSession) {
 Config Config::load(bool requireSession,const std::string& path) {
     std::ifstream f(path);auto j=Json::parse(f,nullptr,false);
     if(!j.is_object())throw std::runtime_error("Open SwitchMusic to sign in");
-    Config c{j.value("backend_url",std::string{}),j.value("username",std::string{}),j.value("session",std::string{})};
+    Config c{j.value("backend_url",std::string{}),j.value("username",std::string{}),j.value("session",std::string{}),j.value("volume",80.0)};
     c.validate(requireSession);return c;
 }
 void Config::save(const std::string& path) const {
     auto c=*this;c.validate(!c.session.empty());
-    auto raw=Json{{"backend_url",c.backend},{"username",c.username},{"session",c.session}}.dump(2)+"\n";
+    auto raw=Json{{"backend_url",c.backend},{"username",c.username},{"session",c.session},{"volume",c.volume}}.dump(2)+"\n";
     auto temporary=path+".tmp";
     int fd=open(temporary.c_str(),O_WRONLY|O_CREAT|O_TRUNC,0600);
     if(fd<0)throw std::runtime_error("Cannot save login on SD card");
@@ -110,14 +112,14 @@ static std::string request(const Config& c,const std::string& path,void* out,cur
     for(auto* item=cookies;item;item=item->next){std::string line=item->data;std::string marker="\tswitchmusic_session\t";auto name=line.rfind(marker);if(name!=std::string::npos)return line.substr(name+marker.size());}
     return "";
 }
-std::vector<uint8_t> apiBytes(const Config& c,const std::string& path,size_t limit,const std::function<bool()>& cancel){
+std::vector<uint8_t> apiBytes(const Config& c,const std::string& path,size_t limit,const std::function<bool()>& cancel,long timeout){
     struct Sink{std::vector<uint8_t> data;size_t limit;};Sink sink{{},limit};sink.data.reserve(std::min<size_t>(limit,128*1024));
     auto collectBytes=+[](char* bytes,size_t a,size_t b,void* context)->size_t{
         auto& sink=*static_cast<Sink*>(context);size_t n=a*b;
         if(n>sink.limit-sink.data.size())return 0;
         try{sink.data.insert(sink.data.end(),bytes,bytes+n);return n;}catch(...){return 0;}
     };
-    request(c,path,&sink,collectBytes,8,nullptr,"",cancel);return std::move(sink.data);
+    request(c,path,&sink,collectBytes,timeout,nullptr,"",cancel);return std::move(sink.data);
 }
 Json signIn(Config c,const std::string& password) {
     c.session.clear();c.validate(false);

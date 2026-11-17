@@ -65,7 +65,7 @@ releases its textures. A music-note placeholder remains when artwork is absent.
 
 Now Playing uses a two-column XML layout: cover/metadata, icon transport buttons,
 a seekable progress bar, shuffle/repeat and stop on the left; a full-height synced-lyrics panel on the right.
-The active line is centered between the previous and next lines. Play/pause changes
+Five fixed lyric slots show the previous line, current line (second), and three upcoming lines. Play/pause changes
 its vector glyph with playback state, retaining the standard button focus and
 controller bindings. The current cover uses 256-pixel backend RGBA4444 data and is cleared
 when the track changes; full-size covers do not enter the thumbnail cache.
@@ -78,8 +78,8 @@ seek on release. The overlay has a separate focusable progress-bar row below the
 icons. Press Down to reach it, then use the same seek/apply/cancel controls.
 Press Up to return to the icons, or Down again to reach shuffle/repeat.
 Shuffle and repeat state are shared by both interfaces. Repeat cycles Off → Queue
-→ Song → Off. Manual Next still skips when repeat-song is selected. Volume controls
-are removed; the sysmodule always opens audio output at the previous 70% default.
+→ Song → Off. Manual Next still skips when repeat-song is selected. Volume controls are available only in Settings. The default is 80%; the saved
+setting survives app/sysmodule restarts and audio-output recovery.
 
 The app now uses the same RGBA4444 wire format as the working overlay. The network
 worker expands color/alpha nibbles into RGBA8; the render thread uploads a NanoVG
@@ -89,3 +89,9 @@ downsampled to 64 pixels before caching. Updating the backend enables smaller
 thumbnail responses but is not required for compatibility with the previous release.
 Artwork failures retry up to three attempts and record the latest path/reason in
 `sdmc:/config/switchmusic/artwork.log`; account credentials are not logged.
+
+Settings contains the XML `brls:Slider` for output gain (0–100%). Changes save after
+250 ms without input and are sent over IPC; the sysmodule also reloads the saved
+value when it starts or configuration changes. Neither Now Playing nor the overlay
+has a volume control. Overlay R opens its five-line lyric screen and L returns;
+the screen uses sysmodule IPC and does not fetch the backend directly.

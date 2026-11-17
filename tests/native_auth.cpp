@@ -26,7 +26,8 @@ int main(int argc,char** argv){
     }
     bool denied=false;try{signIn(config,"wrong-password");}catch(const HttpError& e){denied=e.status==401;}assert(denied);
     auto login=signIn(config,password);config.session=login.at("session");assert(config.session.size()==43);
-    config.save(path);auto restored=Config::load(true,path);assert(restored.session==config.session);
+    config.save(path);auto restored=Config::load(true,path);assert(restored.session==config.session&&restored.volume==80);
+    config.volume=37;config.save(path);assert(Config::load(true,path).volume==37);
     std::ifstream file(path);auto saved=Json::parse(file);assert(!saved.contains("password")&&!saved.contains("ca_bundle"));
     assert(api(restored,"/auth/me").at("user").at("username")=="admin");
     assert(post(restored,"/auth/apple/qr/start",Json::object()).at("confirmation")=="123-456");
@@ -36,6 +37,6 @@ int main(int argc,char** argv){
     Config::clear(path);assert(Config::load(false,path).backend==config.backend);assert(Config::load(false,path).session.empty());
     denied=false;try{Config::load(true,path);}catch(...){denied=true;}assert(denied);
     {std::ofstream legacy(path);legacy<<Json{{"backend_url",config.backend},{"username","admin"},{"password",password},{"ca_bundle","obsolete.pem"}};}
-    assert(Config::load(false,path).session.empty());Config::clear(path);std::ifstream legacy(path);saved=Json::parse(legacy);assert(!saved.contains("password")&&!saved.contains("ca_bundle"));
+    assert(Config::load(false,path).session.empty()&&Config::load(false,path).volume==80);Config::clear(path);std::ifstream legacy(path);saved=Json::parse(legacy);assert(!saved.contains("password")&&!saved.contains("ca_bundle"));
     curl_global_cleanup();std::cout<<"Native login, cookie persistence, revocation, expiry, URL validation and legacy migration passed\n";
 }

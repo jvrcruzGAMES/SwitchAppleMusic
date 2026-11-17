@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include "../include/seek_bar.hpp"
+#include "../include/lyrics_panel.hpp"
 using namespace smusic;
 using Clock = std::chrono::steady_clock;
 namespace {
@@ -69,10 +70,6 @@ class PlayerPanel : public tsl::elm::Element {
         }
         if (keys & HidNpadButton_L) {
             command({{"op", "previous"}});
-            return true;
-        }
-        if (keys & HidNpadButton_R) {
-            command({{"op", "next"}});
             return true;
         }
         if (keys & HidNpadButton_Y) {
@@ -182,7 +179,7 @@ class Controls : public tsl::Gui {
 
   public:
     tsl::elm::Element *createUI() override {
-        auto *frame = new tsl::elm::OverlayFrame("SwitchMusic", "Now playing · L/R skip · Y pause");
+        auto *frame = new tsl::elm::OverlayFrame("SwitchMusic", "Now playing · R lyrics · Y pause");
         auto *list = new tsl::elm::List();
         panel = new PlayerPanel(cover, [this](Json request) { command(std::move(request)); });
         list->addItem(panel, 444);
@@ -194,6 +191,10 @@ class Controls : public tsl::Gui {
         add(list, "Stop playback", [] { return Json{{"op", "stop"}}; });
         frame->setContent(list);
         return frame;
+    }
+    bool handleInput(u64 keys,u64,const HidTouchState&,HidAnalogStickState,HidAnalogStickState)override{
+        if(keys&HidNpadButton_R){if(configured)tsl::changeTo<OverlayLyricsScreen>(config);return true;}
+        return false;
     }
     void update() override {
         auto now = Clock::now();

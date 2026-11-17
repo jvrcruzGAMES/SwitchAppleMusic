@@ -37,7 +37,8 @@ class Backend(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith('/v1/lyrics/'):
             payload={'provider':'syncedlyrics','lines':[{'time_ms':0,'text':'A little closer to the music'},
                 {'time_ms':10000,'text':'Let the night carry us home'},
-                {'time_ms':20000,'text':'Every moment has a melody'}]}
+                {'time_ms':20000,'text':'Every moment has a melody'},
+                {'time_ms':30000,'text':'Underneath the silver sky'}, {'time_ms':40000,'text':'We will keep the music alive'}]}
         elif self.path.startswith('/v1/catalog/search?'):
             term=parse_qs(urlsplit(self.path).query).get('term',[''])[0]
             payload={'items':[{'id':str(100+i),'type':'albums' if term=='preview' or i%3==0 else 'songs',

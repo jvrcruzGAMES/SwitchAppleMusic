@@ -51,8 +51,10 @@ CMIF command **0** carries one UTF-8 JSON request in an input HIPC MapAlias buff
 | `seek` | `seconds` (absolute, clamped to at least zero) | accepted |
 | `shuffle` | `enabled: bool` | accepted |
 | `repeat` | `mode: "off", "single" or "queue"` | accepted |
+| `volume` | `value` (0–100; NRO Settings only) | accepted |
+| `lyrics` | `track_id` | Ready/error and five visible strings |
 
-An accepted response means **queued**, not that playback succeeded. Errors are `{error:"…"}`. State contains `status`, `paused`, `position` and `duration` in seconds, `shuffle`, `repeat`, and the resolved `track`. Queue position/size refer to the retained queue window. Track preparation, transport or decoder errors appear in state. Poll to observe completion.
+An accepted response means **queued**, not that playback succeeded. Errors are `{error:"…"}`. State contains `status`, `paused`, `position` and `duration` in seconds, `shuffle`, `repeat`, `volume`, and the resolved `track`. Queue position/size refer to the retained queue window. Track preparation, transport or decoder errors appear in state. Poll to observe completion.
 
 Both UIs use the common libnx IPC client. The sysmodule registers `smusic` with SM, which creates sessions on the caller's behalf and transfers the handles. Direct `svcConnectToNamedPort` charges session allocation to the NRO and can fail with kernel LimitReached (`0x00010801`) even when the overlay connects. Before lookup, clients use Atmosphere's TIPC `HasService` command 65100 so an already-disabled module does not enter a deferred SM lookup. At most four sessions are accepted; the server multiplexes the port and sessions and closes idle sessions after two seconds. Each UI serializes and reuses one connection, renewing it after a one-second gap or a backend/account change. A closed/invalid handle retries state/artwork once; toggle, play and skip are never replayed. Session-capacity errors receive bounded retries. Normal exit unregisters the owned service; Atmosphere removes hosted registrations when the owner's attached SM session closes after termination. Desktop previews return an IPC-unavailable error and never fall back to local TCP. The NRO's single HTTP worker uses two BSD sessions with buffer efficiency two instead of the vendored demo's twelve-session application configuration.
 
@@ -131,7 +133,7 @@ Repeat-queue restarts the initial ID page and its continuation after EOF. Shuffl
 keeps the current track and permutes the loaded queue; subsequent remote pages are
 shuffled as they arrive. The queue retains a 28-ID previous-track history and an
 initial page for repeat, rather than loading an entire paginated library into RAM.
-The default audio gain remains 0.70 and the mutable volume command is removed.
+Audio gain defaults to 0.80 and is adjusted through the NRO Settings slider only. Volume commands do not cancel the decoder.
 
 The two progress bars preview controller seeks locally (Left/Right, A apply,
 B cancel), and commit touch seeks on release. Seeking does not issue commands on
@@ -157,3 +159,20 @@ Failed downloads, invalid pixel data and texture-allocation failures receive at
 most three attempts with a two-second retry delay, and report the latest diagnostic
 to `config/switchmusic/artwork.log`. Missing covers still leave the music-note
 placeholder and do not prevent browsing or playback.
+
+`Config.volume` defaults to 80 when absent and is persisted alongside the local
+server/login configuration. Settings debounces saves and volume IPC by 250 ms;
+the worker also reloads the value from SD and reapplies it when opening audio.
+Audio-output reset/reopen preserves the selected gain. The worker retains its last valid configuration across transient SD read/rename failures, so saving a slider change cannot revoke the active session merely because the file is briefly being replaced. No gain control is exposed
+on the player or overlay.
+
+Both lyric views use the same five-slot timing function: slot 0 is the previous
+LRC line, slot 1 is the last line with timestamp <= playback position, and slots
+2–4 are the next three lines. Empty boundary slots retain their space. The NRO
+binds five fixed-height XML labels; the overlay wraps each LRC line within its
+fixed slot and emphasizes slot 1. R opens the overlay lyric screen; L returns.
+A lazy sysmodule lyric worker downloads up to 256 KiB of LRC JSON when requested,
+validates timestamp order and retains only the current song. HTTP work is outside
+IPC/audio threads, while `op: lyrics` returns just the five visible strings. Track
+or account changes cancel stale work. The NRO retains its existing backend lyric
+fetch and shares the same timing function. No backend changes are required.

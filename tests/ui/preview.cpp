@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
     } else if (scene == "player")
         library.playing();
     Json playback = {{"status", "playing"}, {"paused", false}, {"position", 15.0}, {"duration", 215.0},
-                     {"volume", 70.0}, {"track", {{"id", "100"}, {"title", "Midnight Echoes"},
+                     {"volume", 80.0}, {"track", {{"id", "100"}, {"title", "Midnight Echoes"},
                      {"artist", "The Northern Lights"}, {"album", "After Hours"},
                      {"artwork_path", "/v1/artwork/songs/100"}}}};
     // Layout frames also exercise the real XML parser, view factories and focus.
@@ -104,6 +104,10 @@ int main(int argc, char **argv) {
             assert(brls::Application::mainLoop());
             assert(brls::Application::getCurrentFocus() == root->getView(move.second));
         }
+        const char* lyricIds[]={"player/previous-line","player/lyric","player/nearby","player/next-2","player/next-3"};
+        const char* expected[]={"A little closer to the music","Let the night carry us home","Every moment has a melody","Underneath the silver sky","We will keep the music alive"};
+        for(unsigned i=0;i<5;++i){auto* line=dynamic_cast<brls::Label*>(root->getView(lyricIds[i]));assert(line&&line->getFullText()==expected[i]);
+            if(i)assert(line->getFrame().getMinY()>=root->getView(lyricIds[i-1])->getFrame().getMaxY());}
         auto* seek=dynamic_cast<SeekBar*>(root->getView("player/seek"));assert(seek);
         double target=-1;seek->onSeek([&](double value){target=value;});
         brls::Application::giveFocus(seek);
@@ -122,6 +126,13 @@ int main(int argc, char **argv) {
         std::cout << "Player artwork, full-height lyrics, icon state and controls verified" << std::endl;
     }
 
+    if(scene=="settings"){
+        auto* slider=dynamic_cast<brls::Slider*>(root->getView("settings/volume"));assert(slider&&std::abs(slider->getProgress()-.8f)<.001f);
+        slider->setProgress(.37f);
+        assert(dynamic_cast<brls::Label*>(root->getView("settings/volume-label"))->getFullText()=="Output volume: 37%");
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));library.tick();
+        assert(Config::load().volume==37);
+    }
     if (scene == "navigation") {
         auto render = [&] {
             for (int i = 0; i < 20; ++i) {

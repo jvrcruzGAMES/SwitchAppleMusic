@@ -6,6 +6,7 @@
 #include <switchmusic/audio.hpp>
 #include <switchmusic/audio_output.hpp>
 #include <switchmusic/playback_queue.hpp>
+#include <switchmusic/lyrics_worker.hpp>
 #include <curl/curl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -47,9 +48,9 @@ void __appInit() {
 void __appExit() {if(controlPortRegistered){smUnregisterService(smEncodeName(ControlServiceName));}romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}
 }
 class Player {
-    ArtworkWorker artwork;
+    ArtworkWorker artwork;LyricsWorker lyrics;
     Config config;std::mutex lock;std::deque<Json> commands;
-    Json state={{"status","stopped"},{"position",0.0},{"duration",0.0},{"paused",false},{"shuffle",false},{"repeat","off"}};
+    Json state={{"status","stopped"},{"position",0.0},{"duration",0.0},{"paused",false},{"shuffle",false},{"repeat","off"},{"volume",80.0}};
     PlaybackQueue queue{uint32_t(armGetSystemTick())};std::string manifest;
     std::unique_ptr<AudioDecoder> decoder;std::unique_ptr<AudioOutput> output;
     std::atomic<bool> shuttingDown{false};
@@ -61,17 +62,19 @@ class Player {
         if(shuttingDown.load()||revision.load()!=operation)return true;
         auto now=std::chrono::steady_clock::now();
         if(now-lastCredentials>std::chrono::seconds(1)){
-            lastCredentials=now;try{auto current=Config::load();if(current.session!=config.session||current.backend!=config.backend)return true;}catch(...){return true;}
+            lastCredentials=now;try{auto current=Config::load();if(current.session!=config.session||current.backend!=config.backend)return true;}catch(...){/* A settings-file replacement can be briefly unreadable; retain the active session. */}
         }
         return false;
     }
     void stop(){if(output)output->reset();decoder.reset();manifest.clear();paused=draining=started=false;resumePosition=0;update({{"status","stopped"},{"position",0.0},{"paused",false},{"error",""}});}
     void syncConfig(){
-        Config next;try{next=Config::load();}catch(...){}
+        Config next;try{next=Config::load();}catch(...){return;}
+        if(next.volume!=config.volume){if(output)output->volume(next.volume);update({{"volume",next.volume}});}
         if(next.backend!=config.backend||next.username!=config.username||next.session!=config.session){
-            artwork.clear();stop();queue.clear();config=std::move(next);
+            artwork.clear();lyrics.prepare(next,Json::object());stop();queue.clear();config=std::move(next);
             update({{"status",config.session.empty()?"signed out":"stopped"},{"track",Json::object()},{"duration",0.0},{"error",""},{"http_status",0}});
         }
+        config.volume=next.volume;
     }
     Json get(const std::string& path){HttpInput http(config,[this]{return cancelled();});return Json::parse(http.text(path,256*1024));}
     void openDecoder(){decoder=std::make_unique<AudioDecoder>(config,manifest,[this]{return cancelled();});if(decoder->duration()>0)resumePosition=std::min(resumePosition,decoder->duration());output->reset(resumePosition);started=false;if(resumePosition>0)decoder->seek(resumePosition);draining=false;}
@@ -81,7 +84,7 @@ class Player {
         update({{"status","loading"},{"error",""},{"http_status",0},{"paused",false},{"queue_index",queue.index()},{"queue_size",queue.size()}});
         auto track=queue.current();auto resolved=get("/v1/resolve/"+encode(track.at("type"))+"/"+encode(track.at("id")));
         if(!resolved.contains("playback_path")||!resolved["playback_path"].is_string())throw std::runtime_error("Upgrade the backend for M3U8 playback");
-        artwork.request(config,resolved);
+        artwork.request(config,resolved);lyrics.prepare(config,resolved);
         manifest=resolved["playback_path"];update({{"track",resolved},{"position",0.0},{"duration",resolved.value("duration_ms",0)/1000.0}});
         openDecoder();if(decoder->duration()>0)update({{"duration",decoder->duration()}});update({{"status","playing"}});
     }
@@ -108,6 +111,7 @@ class Player {
             // Reopen after cancellation rather than trusting a partially read MOV packet.
             if(!decoder)openDecoder();else decoder->seek(seconds);draining=false;update({{"position",seconds}});
         }
+        else if(op=="volume"){config.volume=j.at("value");output->volume(config.volume);update({{"volume",config.volume}});}
         else if(op=="shuffle"){queue.setShuffle(j.at("enabled").get<bool>());update({{"shuffle",queue.shuffle()}});}
         else if(op=="repeat"){queue.setRepeat(j.at("mode").get<std::string>());update({{"repeat",queue.repeat()}});}
     }
@@ -116,6 +120,10 @@ public:
     void shutdown(){shuttingDown=true;++revision;}
     Json request(const Json& j) {
         if(j.value("op",std::string{})=="artwork")return artwork.chunk(j);
+        if(j.value("op",std::string{})=="lyrics"){
+            double position;{std::lock_guard guard(lock);position=state.value("position",0.0);}
+            return lyrics.snapshot(j.value("track_id",std::string{}),position);
+        }
         std::lock_guard guard(lock);
         if(j.value("op",std::string{})=="state")return state;
         if(commands.size()>=8)return error("Playback command queue full");
@@ -129,12 +137,13 @@ public:
             if(!j.contains("enabled")||!j["enabled"].is_boolean())return error("Shuffle enabled must be boolean");
         } else if(op=="repeat") {
             if(!j.contains("mode")||!j["mode"].is_string()||(j["mode"]!="off"&&j["mode"]!="single"&&j["mode"]!="queue"))return error("Repeat must be off, single or queue");
-        } else if(op=="seek") {
-            auto field="seconds";
+        } else if(op=="seek"||op=="volume") {
+            auto field=op=="seek"?"seconds":"value";
             if(!j.contains(field)||!j[field].is_number()||!std::isfinite(j[field].get<double>()))return error("Numeric value required");
+            if(op=="volume"&&(j[field].get<double>()<0||j[field].get<double>()>100))return error("Volume must be between 0 and 100");
         } else if(op!="toggle"&&op!="next"&&op!="previous"&&op!="stop")return error("Unknown operation");
         auto pending=j;
-        if(op!="shuffle"&&op!="repeat")pending["revision"]=++revision;
+        if(op!="shuffle"&&op!="repeat"&&op!="volume")pending["revision"]=++revision;
         commands.push_back(std::move(pending));return {{"accepted",true}};
     }
     void run(){
@@ -145,7 +154,7 @@ public:
                 try{
                     auto now=std::chrono::steady_clock::now();
                     if(!next.is_null()||now-lastConfig>std::chrono::seconds(1)){syncConfig();lastConfig=now;}
-                    if(!output&&!next.is_null())output=std::make_unique<AudioOutput>();
+                    if(!output&&!next.is_null()){output=std::make_unique<AudioOutput>();output->volume(config.volume);}
                     if(!next.is_null())act(next);
                     if(decoder&&!paused){
                         int slot=output->available();

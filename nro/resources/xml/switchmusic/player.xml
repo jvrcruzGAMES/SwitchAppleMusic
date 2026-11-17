@@ -38,9 +38,12 @@
     <brls:Box id="player/lyrics-panel" axis="column" grow="1" minWidth="0" padding="26" backgroundColor="#201E2A" cornerRadius="14">
         <brls:Label text="SYNCED LYRICS" fontSize="14" textColor="#FA4566"/>
         <brls:Box axis="column" grow="1" justifyContent="center" minHeight="0">
-            <brls:Label id="player/previous-line" text="" fontSize="22" textColor="#777E8D" marginBottom="20"/>
-            <brls:Label id="player/lyric" text="Lyrics appear here." fontSize="30" textColor="#F4F5F7" marginBottom="20"/>
-            <brls:Label id="player/nearby" text="" fontSize="22" textColor="#9099AA"/>
+            <brls:Label id="player/previous-line" text="" fontSize="21" height="52" shrink="0" clipsToBounds="true" textColor="#777E8D" marginBottom="8"/>
+            <brls:Label id="player/lyric" text="Lyrics appear here." fontSize="28" height="72" shrink="0" clipsToBounds="true" textColor="#F4F5F7" marginBottom="8"/>
+            <brls:Label id="player/nearby" text="" fontSize="21" height="52" shrink="0" clipsToBounds="true" textColor="#A9B0BF" marginBottom="8"/>
+            <brls:Label id="player/next-2" text="" fontSize="21" height="52" shrink="0" clipsToBounds="true" textColor="#9099AA" marginBottom="8"/>
+            <brls:Label id="player/next-3" text="" fontSize="21" height="52" shrink="0" clipsToBounds="true" textColor="#777E8D"/>
+
         </brls:Box>
         <brls:Label id="player/credit" text="syncedlyrics" fontSize="13" textColor="#9099AA" marginTop="12"/>
     </brls:Box>

@@ -70,3 +70,12 @@ backend that rejects 64-pixel raw images, and a malformed first response followe
 by a successful retry. Pixel conversion tests verify RGBA4444 channel/nibble order,
 alpha expansion, 256-to-64 downsampling and malformed-length rejection. Desktop
 rendering uses OpenGL; final deko3d/hardware confirmation remains required.
+
+Volume tests cover the 80% default, persistence/migration in local config, Settings
+slider label/save behavior, and restoring a custom gain after audio-output reopen.
+The shared lyric-window test covers pre-roll, current-in-slot-1, next-three and
+end-of-track boundaries; a local backend fixture exercises the actual lazy lyric
+worker and stale-track rejection. The overlay renderer fixture checks all five
+strings, vertical slots and current-line emphasis. NRO pixel/layout tests verify
+all five label contents and non-overlap. Overlay R/L switching and physical slider
+input still require Switch acceptance testing.

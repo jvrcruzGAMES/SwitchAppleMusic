@@ -62,7 +62,7 @@ Json control(const Config& config,Json request){
         std::lock_guard guard(connection.mutex);
         std::vector<char> output(MaxControlBytes);
         const auto operation=request.value("op",std::string{});
-        const bool readOnly=operation=="state"||operation=="artwork";
+        const bool readOnly=operation=="state"||operation=="artwork"||operation=="lyrics";
         for(unsigned attempt=0;attempt<2;++attempt){
             Result rc=connection.connect(config);
             if(R_FAILED(rc)){

@@ -3,6 +3,11 @@
     <brls:Label text="ACCOUNT" fontSize="15" textColor="#FA4566" marginBottom="10"/>
     <brls:Label id="page/title" text="Your music, your way." fontSize="34" textColor="#F4F5F7" marginBottom="10"/>
     <brls:Label id="page/subtitle" text="Manage your server account and Apple Music library connection." fontSize="19" textColor="#A9B0BF" marginBottom="24"/>
+    <brls:Box axis="column" padding="20" backgroundColor="#1C212D" cornerRadius="14" marginBottom="20">
+        <brls:Label id="settings/volume-label" text="Output volume: 80%" fontSize="20" textColor="#F4F5F7" marginBottom="12"/>
+        <brls:Slider id="settings/volume" width="100%" height="40"/>
+        <brls:Label text="Left / Right or drag to adjust · Saved on this Switch" fontSize="15" textColor="#9099AA" marginTop="10"/>
+    </brls:Box>
     <brls:Box axis="column" width="100%" height="auto" padding="26" backgroundColor="#1C212D" cornerRadius="14" marginBottom="20">
         <brls:Label id="settings/server" text="Server" fontSize="18" textColor="#A9B0BF" marginBottom="10"/>
         <brls:Label id="settings/user" text="Account" fontSize="23" textColor="#F4F5F7" marginBottom="10"/>

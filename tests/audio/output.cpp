@@ -27,7 +27,7 @@ int main(){
         int free=output.available();assert(free>=0);output.append(free,4096);assert(output.available()==-1);
         output.pause(true);auto paused=output.position();played+=100;assert(output.position()==paused);
         output.pause(false);playOne();assert(std::abs(output.position()-8192.0/48000)<1e-9);
-        assert(std::abs(volume-.7f)<.0001f);
+        assert(std::abs(volume-.8f)<.0001f);
         output.reset(10);assert(output.empty());assert(output.position()==10);
         output.append(output.available(),1000);output.pause(false);playOne();assert(output.empty());assert(std::abs(output.position()-(10+1000.0/48000))<1e-9);
     }
@@ -37,9 +37,9 @@ int main(){
         auto previousOpens=opens;delayed=true;output.reset();
         assert(waits>0&&opens==previousOpens&&output.empty());
         for(int i=0;i<4;++i)output.append(output.available(),4096);
-        stuck=true;output.reset(25);
+        output.volume(35);stuck=true;output.reset(25);
         assert(opens==previousOpens+1&&closes>0&&output.empty()&&output.position()==25);
-        assert(std::abs(volume-.7f)<.0001f);
+        assert(std::abs(volume-.35f)<.0001f);
         output.append(output.available(),1000);output.pause(false);playOne();
         assert(output.empty()&&output.position()>25);
         for(int i=0;i<10;++i){output.append(output.available(),4096);output.reset();assert(output.empty());}

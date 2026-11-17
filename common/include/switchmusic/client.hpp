@@ -8,6 +8,7 @@ namespace smusic {
 using Json = nlohmann::json;
 struct Config {
     std::string backend, username, session;
+    double volume=80;
     static constexpr const char* Path = "sdmc:/config/switchmusic/config.json";
     static Config load(bool requireSession=true, const std::string& path=Path);
     void save(const std::string& path=Path) const;
@@ -23,7 +24,7 @@ public:
 Json error(const std::string& message);
 std::string encode(const std::string& value);
 Json api(const Config&, const std::string& path);
-std::vector<uint8_t> apiBytes(const Config&, const std::string& path,size_t limit=256*1024,const std::function<bool()>& cancel={});
+std::vector<uint8_t> apiBytes(const Config&, const std::string& path,size_t limit=256*1024,const std::function<bool()>& cancel={},long timeout=8);
 Json post(const Config&, const std::string& path, const Json& body);
 Json signIn(Config, const std::string& password);
 void signOut(const Config&);

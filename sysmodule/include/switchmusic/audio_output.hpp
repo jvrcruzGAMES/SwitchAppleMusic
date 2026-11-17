@@ -12,13 +12,13 @@ private:
     alignas(0x1000) int16_t pcm[Count][Frames*2]{};
     AudioOutBuffer buffers[Count]{};bool queued[Count]{};
     uint64_t submitted=0,base=0,playedBefore=0;double origin=0;bool initialized=false,running=false;
-    static constexpr double DefaultVolume=70;
+    double level=80;
     void initialize(){
         check(audoutInitialize());initialized=true;
         try{
             if(audoutGetSampleRate()!=48000||audoutGetChannelCount()!=2||audoutGetPcmFormat()!=PcmFormat_Int16)
                 throw std::runtime_error("Unsupported Horizon audio output");
-            check(audoutSetAudioOutVolume(float(DefaultVolume/100)));
+            check(audoutSetAudioOutVolume(float(level/100)));
         }catch(...){audoutExit();initialized=false;throw;}
     }
     void check(Result rc){if(R_FAILED(rc))throw std::runtime_error("Horizon audio output failed: "+std::to_string(rc));}
@@ -41,6 +41,7 @@ public:
         if(value){if(running){u64 played=base;check(audoutGetAudioOutPlayedSampleCount(&played));playedBefore=std::min<uint64_t>(submitted,playedBefore+(played>=base?played-base:0));}check(audoutStopAudioOut());running=false;}
         else{check(audoutStartAudioOut());check(audoutGetAudioOutPlayedSampleCount(&base));running=true;}
     }
+    void volume(double percent){level=std::clamp(percent,0.0,100.0);check(audoutSetAudioOutVolume(float(level/100)));}
     void reset(double seconds=0){
         try{
             check(audoutStopAudioOut());bool flushed=false;check(audoutFlushAudioOutBuffers(&flushed));

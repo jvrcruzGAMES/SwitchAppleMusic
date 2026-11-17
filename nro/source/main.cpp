@@ -1,6 +1,7 @@
 #include <borealis.hpp>
 #include <switchmusic/client.hpp>
 #include <switchmusic/artwork_pixels.hpp>
+#include <switchmusic/lyrics.hpp>
 #include <curl/curl.h>
 #ifdef __SWITCH__
 #include <switch.h>
@@ -292,6 +293,7 @@ class Library {
     std::unordered_map<std::string, std::vector<brls::Image *>> artworkViews;
     std::unordered_map<std::string, std::shared_ptr<std::vector<uint8_t>>> artworkCache;
     std::deque<std::string> artworkQueue, artworkLRU;
+    bool volumePending=false;Clock::time_point volumeChanged{};
     bool artworkPending = false;
     std::unordered_map<std::string,unsigned> artworkAttempts;
     Clock::time_point artworkRetry{};
@@ -406,6 +408,7 @@ class Library {
     }
 
   public:
+    ~Library(){if(volumePending)try{config.save();}catch(...){}}
     explicit Library(Network &n) : net(n) {
         // Borealis theme tokens have no XML loader; set them once before inflation.
         auto &theme = brls::Theme::getDarkTheme();
@@ -563,7 +566,7 @@ class Library {
         artworkCache.clear();
         artworkLRU.clear();
         // Guest browsing validates only the server address, never a half-entered username.
-        Config anonymous{config.backend, "", ""};
+        Config anonymous{config.backend, "", "",config.volume};
         try {
             anonymous.validate(false);
         } catch (const std::exception &e) {
@@ -717,10 +720,19 @@ class Library {
         text("settings/apple", linked ? "Apple Music library connected" : "Apple Music library not linked");
         view<brls::Button>(page, "settings/link")
             ->setText(linked ? "Relink Apple Music with QR code" : "Link Apple Music with QR code");
+        auto* volumeSlider=view<brls::Slider>(page,"settings/volume");
+        volumeSlider->setProgress(float(config.volume/100));
+        text("settings/volume-label","Output volume: "+std::to_string(int(config.volume))+"%");
+        volumeSlider->getProgressEvent()->subscribe([this](float value){
+            double percent=std::round(std::clamp(double(value),0.0,1.0)*100);
+            if(percent==config.volume)return;
+            config.volume=percent;volumePending=true;volumeChanged=Clock::now();
+            text("settings/volume-label","Output volume: "+std::to_string(int(percent))+"%");
+        });
         bind("settings/link", [this] { startQR(); });
         bind("settings/browse", [this] { home(); });
         bind("settings/logout", [this] { logout(); });
-        focus("settings/link");
+        focus("settings/volume");
     }
     void startQR() {
         endQR();
@@ -965,25 +977,16 @@ class Library {
             lyricId = id;
             lines = Json::array();
             nearby->setText("");
-            view<brls::Label>(page, "player/previous-line")->setText("");
+            for(auto id:{"player/previous-line","player/next-2","player/next-3"})view<brls::Label>(page,id)->setText("");
             credit->setText("syncedlyrics");
             lyric->setText(id.empty() ? "Lyrics appear here." : "Loading lyrics…");
             if (!id.empty()) net.submit({"lyrics", "/v1/lyrics/" + encode(id), {}, generation});
         }
         if (!lines.empty()) {
-            long ms = long(position * 1000);
-            int active = -1;
-            for (size_t i = 0; i < lines.size(); ++i) {
-                if (lines[i].value("time_ms", 0L) <= ms)
-                    active = i;
-                else
-                    break;
-            }
-            lyric->setText(active >= 0 ? lines[active].value("text", std::string{}) : "♪");
-            view<brls::Label>(page, "player/previous-line")->setText(
-                active > 0 ? lines[active-1].value("text", std::string{}) : "");
-            nearby->setText(active + 1 < int(lines.size()) ? lines[active + 1].value("text", std::string{})
-                                                           : "");
+            auto window=lyricWindow(lines,position);
+            unsigned slot=0;
+            for(auto id:{"player/previous-line","player/lyric","player/nearby","player/next-2","player/next-3"})
+                view<brls::Label>(page,id)->setText(window[slot++]);
         }
     }
     // Focus only after Yoga has measured a newly inflated page. This lets the
@@ -1001,6 +1004,11 @@ class Library {
     }
     void tick() {
         settleFocus();
+        if(volumePending&&Clock::now()-volumeChanged>=std::chrono::milliseconds(250)){
+            volumePending=false;
+            try{config.save();command({{"op","volume"},{"value",config.volume}});}
+            catch(const std::exception& e){notice->setText(e.what());}
+        }
         if (navigation) {
             auto action = std::move(navigation);
             navigation = {};
@@ -1033,6 +1041,7 @@ class Library {
                 loginScreen("Your login expired or was revoked. Sign in again, or browse as a guest.");
                 continue;
             }
+            if(job.type=="lyrics"&&job.path!="/v1/lyrics/"+encode(lyricId))continue;
             if (job.type == "artwork") {
                 artworkPending = false;
                 if (result.contains("bytes") && result["bytes"].is_binary()) {

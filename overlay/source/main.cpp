@@ -5,6 +5,7 @@
 #include <switchmusic/artwork.hpp>
 #include <chrono>
 #include <cmath>
+#include <optional>
 using namespace smusic;
 using Clock = std::chrono::steady_clock;
 namespace {
@@ -17,6 +18,10 @@ class PlayerPanel : public tsl::elm::Element {
     const CoverReceiver &cover;
     std::function<void(Json)> command;
     unsigned selected = 1;
+    bool seekFocus=false;
+    std::optional<double> seekPreview;
+    void previewSeek(double seconds){auto total=state.value("duration",0.0);if(total>0)seekPreview=std::clamp(seconds,0.0,total);}
+    void commitSeek(){if(seekPreview){command({{"op","seek"},{"seconds",*seekPreview}});seekPreview.reset();}}
     std::string failure;
     static void triangle(tsl::gfx::Renderer *r, int cx, int cy, int direction, tsl::Color color) {
         for (int dy = -12; dy <= 12; ++dy) {
@@ -49,6 +54,7 @@ class PlayerPanel : public tsl::elm::Element {
     PlayerPanel(const CoverReceiver &image, std::function<void(Json)> action)
         : cover(image), command(std::move(action)) {}
     void setState(Json value) {
+        if(value.value("track",Json::object()).value("id",std::string{})!=state.value("track",Json::object()).value("id",std::string{}))seekPreview.reset();
         state = std::move(value);
         failure.clear();
     }
@@ -58,6 +64,11 @@ class PlayerPanel : public tsl::elm::Element {
     void drawFocusBackground(tsl::gfx::Renderer *) override {}
     void drawHighlight(tsl::gfx::Renderer *) override {}
     bool onClick(u64 keys) override {
+        if((keys&HidNpadButton_Up)&&!seekFocus){seekFocus=true;return true;}
+        if((keys&HidNpadButton_Down)&&seekFocus){seekFocus=false;seekPreview.reset();return true;}
+        if(seekFocus&&(keys&(HidNpadButton_Left|HidNpadButton_Right))){previewSeek(seekPreview.value_or(state.value("position",0.0))+((keys&HidNpadButton_Right)?5:-5));return true;}
+        if(seekFocus&&(keys&HidNpadButton_A)){commitSeek();return true;}
+        if(seekPreview&&(keys&HidNpadButton_B)){seekPreview.reset();return true;}
         if (keys & HidNpadButton_Left) {
             selected = (selected + 2) % 3;
             return true;
@@ -85,6 +96,12 @@ class PlayerPanel : public tsl::elm::Element {
         return false;
     }
     bool onTouch(tsl::elm::TouchEvent event, s32 x, s32 y, s32, s32, s32 initialX, s32 initialY) override {
+        if(std::abs(initialY-(getY()+346))<=20 && initialX>=getX()+24 && initialX<=getX()+getWidth()-24){
+            seekFocus=true;
+            previewSeek(state.value("duration",0.0)*std::clamp(double(x-getX()-24)/std::max(1,int(getWidth())-48),0.0,1.0));
+            if(event==tsl::elm::TouchEvent::Release)commitSeek();
+            return true;
+        }
         if (event != tsl::elm::TouchEvent::Release || std::abs(x - initialX) > 16 ||
             std::abs(y - initialY) > 16)
             return false;
@@ -113,7 +130,7 @@ class PlayerPanel : public tsl::elm::Element {
         auto song = state.value("track", Json::object());
         centered(r, song.value("title", std::string("Nothing playing")), getY() + 298, 23, white);
         centered(r, song.value("artist", std::string("Choose music in the app")), getY() + 324, 18, muted);
-        double position = state.value("position", 0.0), duration = state.value("duration", 0.0);
+        double position = seekPreview.value_or(state.value("position", 0.0)), duration = state.value("duration", 0.0);
         int width = getWidth() - 48, left = getX() + 24;
         r->drawRoundedRect(left, getY() + 346, width, 4, 2, tsl::Color{4, 4, 5, 15});
         if (duration > 0) {
@@ -121,6 +138,8 @@ class PlayerPanel : public tsl::elm::Element {
             if (filled > 0)
                 r->drawRoundedRect(left, getY() + 346, filled, 4, 2, accent);
         }
+        if(duration>0){int px=left+int(width*std::clamp(position/duration,0.0,1.0));
+            r->drawCircle(px,getY()+348,hasFocus()&&seekFocus?8:5,true,hasFocus()&&seekFocus?accent:white);}
         r->drawString(timeText(position), false, left, getY() + 374, 16, muted);
         auto total = timeText(duration);
         auto length = r->drawString(total, false, 0, 0, 16, tsl::Color{}, 0, false).first;
@@ -128,7 +147,7 @@ class PlayerPanel : public tsl::elm::Element {
         int cy = getY() + 422;
         for (unsigned i = 0; i < 3; ++i) {
             int cx = center + (int(i) - 1) * 96;
-            if (hasFocus() && i == selected) {
+            if (hasFocus() && !seekFocus && i == selected) {
                 r->drawCircle(cx, cy, 34, true, accent);
                 r->drawCircle(cx, cy, 30, true, background);
             } else
@@ -148,7 +167,7 @@ class PlayerPanel : public tsl::elm::Element {
                 r->drawRect(cx + direction * 12 - 1, cy - 12, 3, 24, white);
             }
         }
-        centered(r, "Previous       Play / Pause       Next", getY() + 480, 14, muted);
+        centered(r, seekFocus ? "← / → seek · A apply · B cancel" : "Previous       Play / Pause       Next", getY() + 480, 14, muted);
         centered(r, failure.empty() ? state.value("status", std::string("Connecting…")) : failure,
                  getY() + 505, 14, failure.empty() ? muted : accent);
     }
@@ -156,6 +175,12 @@ class PlayerPanel : public tsl::elm::Element {
 } // namespace
 class Controls : public tsl::Gui {
     PlayerPanel *panel = nullptr;
+    tsl::elm::ListItem *shuffleItem=nullptr,*repeatItem=nullptr;
+    void showModes(){
+        if(shuffleItem)shuffleItem->setValue(state.value("shuffle",false)?"On":"Off");
+        auto mode=state.value("repeat",std::string("off"));
+        if(repeatItem)repeatItem->setValue(mode=="single"?"Song":mode=="queue"?"Queue":"Off");
+    }
     Config config;
     bool configured = false;
     Json state = Json::object();
@@ -166,11 +191,16 @@ class Controls : public tsl::Gui {
     void command(Json request) {
         if (!configured)
             return;
-        auto response = control(config, std::move(request));
+        auto response = control(config, request);
         if (response.contains("error"))
             panel->setError(response["error"]);
+        else if(response.value("accepted",false)){
+            if(request.value("op",std::string{})=="shuffle")state["shuffle"]=request.at("enabled");
+            if(request.value("op",std::string{})=="repeat")state["repeat"]=request.at("mode");
+            showModes();
+        }
     }
-    void add(tsl::elm::List *list, const std::string &text, std::function<Json()> action) {
+    tsl::elm::ListItem* add(tsl::elm::List *list, const std::string &text, std::function<Json()> action) {
         auto *item = new tsl::elm::ListItem(text);
         item->setClickListener([this, action](u64 keys) {
             if (keys & HidNpadButton_A) {
@@ -180,6 +210,7 @@ class Controls : public tsl::Gui {
             return false;
         });
         list->addItem(item);
+        return item;
     }
 
   public:
@@ -188,15 +219,9 @@ class Controls : public tsl::Gui {
         auto *list = new tsl::elm::List();
         panel = new PlayerPanel(cover, [this](Json request) { command(std::move(request)); });
         list->addItem(panel, 512);
-        add(list, "Seek −15 seconds", [this] {
-            return Json{{"op", "seek"}, {"seconds", std::max(0.0, state.value("position", 0.0) - 15)}};
-        });
-        add(list, "Seek +15 seconds",
-            [this] { return Json{{"op", "seek"}, {"seconds", state.value("position", 0.0) + 15}}; });
-        add(list, "Volume −5",
-            [this] { return Json{{"op", "volume"}, {"value", state.value("volume", 70.0) - 5}}; });
-        add(list, "Volume +5",
-            [this] { return Json{{"op", "volume"}, {"value", state.value("volume", 70.0) + 5}}; });
+        shuffleItem=add(list,"Shuffle",[this]{return Json{{"op","shuffle"},{"enabled",!state.value("shuffle",false)}};});
+        repeatItem=add(list,"Repeat",[this]{auto mode=state.value("repeat",std::string("off"));return Json{{"op","repeat"},{"mode",mode=="off"?"queue":mode=="queue"?"single":"off"}};});
+        showModes();
         add(list, "Stop playback", [] { return Json{{"op", "stop"}}; });
         frame->setContent(list);
         return frame;
@@ -219,6 +244,7 @@ class Controls : public tsl::Gui {
                     return;
                 }
                 panel->setState(state);
+                showModes();
                 auto song = state.value("track", Json::object());
                 auto id = song.value("id", std::string{});
                 if (id != trackId) {

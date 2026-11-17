@@ -8,6 +8,7 @@
 #include <atomic>
 #include <unordered_map>
 #include <borealis/core/touch/tap_gesture.hpp>
+#include <borealis/core/touch/pan_gesture.hpp>
 #include <thread>
 #include <mutex>
 #include <deque>
@@ -94,6 +95,43 @@ class TransportIcon : public brls::View {
             nvgMoveTo(vg, 6, 3); nvgLineTo(vg, 21, 12); nvgLineTo(vg, 6, 21); nvgClosePath(vg);
         }
         nvgFillColor(vg, nvgRGB(244, 245, 247)); nvgFill(vg); nvgRestore(vg);
+    }
+};
+class SeekBar : public brls::Box {
+    double position=0, duration=0;
+    std::optional<double> preview;
+    std::function<void(double)> seek;
+    void move(double delta){if(duration>0)preview=std::clamp(preview.value_or(position)+delta,0.0,duration);}
+    void commit(){if(preview&&seek){position=*preview;preview.reset();seek(position);}}
+  public:
+    SeekBar(){
+        setFocusable(true);
+        registerAction("Seek back",brls::BUTTON_NAV_LEFT,[this](brls::View*){move(-5);return true;},true,true);
+        registerAction("Seek forward",brls::BUTTON_NAV_RIGHT,[this](brls::View*){move(5);return true;},true,true);
+        registerAction("Seek",brls::BUTTON_A,[this](brls::View*){commit();return true;});
+        registerAction("Cancel seek",brls::BUTTON_B,[this](brls::View*){if(!preview)return false;preview.reset();return true;});
+        addGestureRecognizer(new brls::PanGestureRecognizer([this](brls::PanGestureStatus status,brls::Sound*){
+            if(status.state==brls::GestureState::FAILED||status.state==brls::GestureState::INTERRUPTED){preview.reset();return;}
+            if(duration<=0)return;
+            brls::Application::giveFocus(this);
+            preview=duration*std::clamp(double(status.position.x-getFrame().getMinX()-12)/std::max(1.0,double(getWidth()-24)),0.0,1.0);
+            if(status.state==brls::GestureState::END)commit();
+        },brls::PanAxis::HORIZONTAL));
+        addGestureRecognizer(new brls::TapGestureRecognizer([this](brls::TapGestureStatus status,brls::Sound*){
+            if(status.state!=brls::GestureState::END||duration<=0)return;
+            preview=duration*std::clamp(double(status.position.x-getFrame().getMinX()-12)/std::max(1.0,double(getWidth()-24)),0.0,1.0);
+            commit();
+        }));
+    }
+    void setState(double seconds,double total){position=seconds;duration=std::max(0.0,total);}
+    void onSeek(std::function<void(double)> action){seek=std::move(action);}
+    double displayedPosition()const{return preview.value_or(position);}
+    void draw(NVGcontext* vg,float x,float y,float width,float height,brls::Style,brls::FrameContext*)override{
+        float left=x+12, span=std::max(0.0f,width-24), cy=y+height/2;
+        float filled=duration>0?span*std::clamp(displayedPosition()/duration,0.0,1.0):0;
+        nvgBeginPath(vg);nvgRoundedRect(vg,left,cy-3,span,6,3);nvgFillColor(vg,nvgRGB(52,59,75));nvgFill(vg);
+        if(filled>0){nvgBeginPath(vg);nvgRoundedRect(vg,left,cy-3,filled,6,3);nvgFillColor(vg,nvgRGB(250,69,102));nvgFill(vg);}
+        nvgBeginPath(vg);nvgCircle(vg,left+filled,cy,8);nvgFillColor(vg,nvgRGB(244,245,247));nvgFill(vg);
     }
 };
 struct Job {
@@ -227,8 +265,7 @@ class Library {
     brls::View *page = nullptr, *safeFocus, *pendingFocus = nullptr;
     brls::Label *notice, *account;
     brls::Label *track = nullptr, *artist = nullptr, *progress = nullptr, *lyric = nullptr, *nearby = nullptr,
-                *credit = nullptr, *volume = nullptr, *album = nullptr, *qrTimer = nullptr;
-    brls::View *fill = nullptr;
+                *credit = nullptr, *album = nullptr, *qrTimer = nullptr;
     Json currentUser = Json::object(), state = Json::object(), items = Json::array(), lines = Json::array();
     std::string screen, currentPath, kind, pageTitle, lyricId, qrCode, playerArtworkPath;
     bool inSettings = false, qrActive = false, qrPending = false, now = false, polling = false;
@@ -292,8 +329,7 @@ class Library {
         brls::Application::giveFocus(safeFocus);
         body->clearViews();
         page = nullptr;
-        track = artist = progress = lyric = nearby = credit = volume = album = qrTimer = nullptr;
-        fill = nullptr;
+        track = artist = progress = lyric = nearby = credit = album = qrTimer = nullptr;
         page = xml(layout);
         body->addView(page);
         screen = mode;
@@ -355,6 +391,7 @@ class Library {
         theme.addColor("brls/button/primary_enabled_text", nvgRGB(255, 255, 255));
         theme.addColor("brls/button/default_enabled_background", nvgRGB(42, 48, 61));
         theme.addColor("brls/button/enabled_border_color", nvgRGB(75, 84, 104));
+        brls::Application::registerXMLView("SwitchMusicSeekBar", [] { return new SeekBar(); });
         brls::Application::registerXMLView("SwitchMusicTransportIcon", [] { return new TransportIcon(); });
         brls::Application::registerXMLView("SwitchMusicQR", [] { return new QRView(); });
         frame = dynamic_cast<brls::AppletFrame *>(xml("shell"));
@@ -837,8 +874,7 @@ class Library {
         artist = view<brls::Label>(page, "page/subtitle");
         album = view<brls::Label>(page, "player/album");
         progress = view<brls::Label>(page, "player/time");
-        volume = view<brls::Label>(page, "player/volume");
-        fill = view(page, "player/fill");
+        view<SeekBar>(page,"player/seek")->onSeek([this](double seconds){command({{"op","seek"},{"seconds",seconds}});});
         lyric = view<brls::Label>(page, "player/lyric");
         nearby = view<brls::Label>(page, "player/nearby");
         credit = view<brls::Label>(page, "player/credit");
@@ -847,15 +883,8 @@ class Library {
             std::string id = pair.first, op = pair.second;
             bind("player/" + id, [this, op] { command({{"op", op}}); });
         }
-        bind("player/rewind", [this] {
-            command({{"op", "seek"}, {"seconds", std::max(0.0, state.value("position", 0.0) - 15)}});
-        });
-        bind("player/forward",
-             [this] { command({{"op", "seek"}, {"seconds", state.value("position", 0.0) + 15}}); });
-        bind("player/quieter",
-             [this] { command({{"op", "volume"}, {"value", state.value("volume", 70.0) - 5}}); });
-        bind("player/louder",
-             [this] { command({{"op", "volume"}, {"value", state.value("volume", 70.0) + 5}}); });
+        bind("player/shuffle",[this]{bool enabled=!state.value("shuffle",false);command({{"op","shuffle"},{"enabled",enabled}});state["shuffle"]=enabled;renderState();});
+        bind("player/repeat",[this]{auto mode=state.value("repeat",std::string("off"));mode=mode=="off"?"queue":mode=="queue"?"single":"off";command({{"op","repeat"},{"mode",mode}});state["repeat"]=mode;renderState();});
         for (auto pair : {std::pair{brls::BUTTON_LB, "previous"}, {brls::BUTTON_RB, "next"}}) {
             std::string op = pair.second;
             page->registerAction(op, pair.first, [this, op](brls::View *) {
@@ -883,8 +912,10 @@ class Library {
         album->setText(song.value("album", std::string("Ready when you are.")));
         double position = state.value("position", 0.0), duration = state.value("duration", 0.0);
         progress->setText(timeText(position) + " / " + timeText(duration));
-        volume->setText("Volume " + std::to_string(int(state.value("volume", 70.0))) + "%");
-        fill->setWidthPercentage(duration > 0 ? float(std::clamp(position / duration, 0.0, 1.0) * 100) : 0);
+        view<SeekBar>(page,"player/seek")->setState(position,duration);
+        view<brls::Button>(page,"player/shuffle")->setText(state.value("shuffle",false)?"Shuffle: On":"Shuffle: Off");
+        auto repeat=state.value("repeat",std::string("off"));
+        view<brls::Button>(page,"player/repeat")->setText(repeat=="single"?"Repeat: Song":repeat=="queue"?"Repeat: Queue":"Repeat: Off");
         auto id = song.value("id", std::string{});
         view<TransportIcon>(page, "player/toggle/icon")->setPlaying(
             !id.empty() && !state.value("paused", false) && state.value("status", std::string{}) != "stopped");

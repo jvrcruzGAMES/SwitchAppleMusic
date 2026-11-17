@@ -5,6 +5,7 @@
 #include <switchmusic/artwork_worker.hpp>
 #include <switchmusic/audio.hpp>
 #include <switchmusic/audio_output.hpp>
+#include <switchmusic/playback_queue.hpp>
 #include <curl/curl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -48,12 +49,12 @@ void __appExit() {if(controlPortRegistered){smUnregisterService(smEncodeName(Con
 class Player {
     ArtworkWorker artwork;
     Config config;std::mutex lock;std::deque<Json> commands;
-    Json state={{"status","stopped"},{"position",0.0},{"duration",0.0},{"volume",70.0},{"paused",false}};
-    Json queue=Json::array();size_t index=0;std::string nextPath,manifest;
+    Json state={{"status","stopped"},{"position",0.0},{"duration",0.0},{"paused",false},{"shuffle",false},{"repeat","off"}};
+    PlaybackQueue queue{uint32_t(armGetSystemTick())};std::string manifest;
     std::unique_ptr<AudioDecoder> decoder;std::unique_ptr<AudioOutput> output;
     std::atomic<bool> shuttingDown{false};
     std::atomic<uint64_t> revision{0};uint64_t operation=0;
-    bool paused=false,draining=false,started=false;double volume=70,resumePosition=0;
+    bool paused=false,draining=false,started=false;double resumePosition=0;
     std::chrono::steady_clock::time_point lastCredentials{};
     void update(Json values){std::lock_guard guard(lock);state.update(values);}
     bool cancelled(){
@@ -64,47 +65,39 @@ class Player {
         }
         return false;
     }
-    void stop(){output->reset();decoder.reset();manifest.clear();paused=draining=started=false;resumePosition=0;update({{"status","stopped"},{"position",0.0},{"paused",false}});}
+    void stop(){if(output)output->reset();decoder.reset();manifest.clear();paused=draining=started=false;resumePosition=0;update({{"status","stopped"},{"position",0.0},{"paused",false},{"error",""}});}
     void syncConfig(){
         Config next;try{next=Config::load();}catch(...){}
         if(next.backend!=config.backend||next.username!=config.username||next.session!=config.session){
-            artwork.clear();stop();queue=Json::array();index=0;nextPath.clear();config=std::move(next);
+            artwork.clear();stop();queue.clear();config=std::move(next);
             update({{"status",config.session.empty()?"signed out":"stopped"},{"track",Json::object()},{"duration",0.0},{"error",""},{"http_status",0}});
         }
     }
     Json get(const std::string& path){HttpInput http(config,[this]{return cancelled();});return Json::parse(http.text(path,256*1024));}
     void openDecoder(){decoder=std::make_unique<AudioDecoder>(config,manifest,[this]{return cancelled();});if(decoder->duration()>0)resumePosition=std::min(resumePosition,decoder->duration());output->reset(resumePosition);started=false;if(resumePosition>0)decoder->seek(resumePosition);draining=false;}
     void load(){
-        if(queue.empty()||index>=queue.size()){stop();return;}
+        if(queue.empty()){stop();return;}
         output->reset();decoder.reset();manifest.clear();paused=draining=started=false;resumePosition=0;
-        update({{"status","loading"},{"error",""},{"http_status",0},{"paused",false},{"queue_index",index},{"queue_size",queue.size()}});
-        auto track=queue[index];auto resolved=get("/v1/resolve/"+encode(track.at("type"))+"/"+encode(track.at("id")));
+        update({{"status","loading"},{"error",""},{"http_status",0},{"paused",false},{"queue_index",queue.index()},{"queue_size",queue.size()}});
+        auto track=queue.current();auto resolved=get("/v1/resolve/"+encode(track.at("type"))+"/"+encode(track.at("id")));
         if(!resolved.contains("playback_path")||!resolved["playback_path"].is_string())throw std::runtime_error("Upgrade the backend for M3U8 playback");
         artwork.request(config,resolved);
         manifest=resolved["playback_path"];update({{"track",resolved},{"position",0.0},{"duration",resolved.value("duration_ms",0)/1000.0}});
         openDecoder();if(decoder->duration()>0)update({{"duration",decoder->duration()}});update({{"status","playing"}});
     }
-    void advance(){
-        if(index+1<queue.size()){++index;load();return;}
-        for(unsigned skipped=0;!nextPath.empty()&&skipped<16;++skipped){
-            auto page=get(nextPath);auto base=nextPath;auto offset=base.find("&offset=");if(offset==std::string::npos)offset=base.find("?offset=");if(offset!=std::string::npos)base.resize(offset);
-            nextPath=page.contains("next_offset")&&!page["next_offset"].is_null()?base+(base.find('?')==std::string::npos?"?":"&")+"offset="+std::to_string(page["next_offset"].get<int>()):"";
-            Json next=Json::array();for(auto& item:page.at("items")){auto type=item.value("type",std::string{});if(type=="songs"||type=="library-songs")next.push_back({{"id",item.at("id")},{"type",type}});}
-            if(!next.empty()){if(queue.size()>28){auto remove=queue.size()-28;queue.erase(queue.begin(),queue.begin()+remove);}index=queue.size();for(auto& item:next)queue.push_back(item);load();return;}
-        }
-        stop();
+    void advance(bool automatic=false){
+        if(queue.advance([this](const std::string& path){return get(path);},automatic))load();else stop();
     }
     void act(const Json& j){
         if(config.session.empty()||j.value("session",std::string{})!=config.session)return;
         auto op=j.at("op").get<std::string>();if(j.contains("revision"))operation=j["revision"];
-        if(op=="play"){queue=j.at("queue");index=j.value("index",size_t(0));nextPath=j.value("next_path",std::string{});load();}
+        if(op=="play"){queue.start(j.at("queue"),j.value("index",size_t(0)),j.value("next_path",std::string{}));load();}
         else if(op=="next")advance();
-        else if(op=="previous"){if(index)--index;load();}
-        else if(op=="stop"){stop();queue=Json::array();nextPath.clear();}
+        else if(op=="previous"){if(queue.previous())load();}
+        else if(op=="stop"){stop();queue.clear();}
         else if(op=="toggle"){
             if(manifest.empty()){
-                if(queue.empty())return;paused=!paused;
-                if(!paused)load();else update({{"paused",true},{"status","paused"}});return;
+                if(queue.empty())return;load();return;
             }
             paused=!paused;if(!paused&&!decoder)openDecoder();
             if(started)output->pause(paused);update({{"paused",paused},{"status",paused?"paused":"playing"}});
@@ -115,7 +108,8 @@ class Player {
             // Reopen after cancellation rather than trusting a partially read MOV packet.
             if(!decoder)openDecoder();else decoder->seek(seconds);draining=false;update({{"position",seconds}});
         }
-        else if(op=="volume"){volume=std::clamp(j.at("value").get<double>(),0.0,100.0);output->volume(volume);update({{"volume",volume}});}
+        else if(op=="shuffle"){queue.setShuffle(j.at("enabled").get<bool>());update({{"shuffle",queue.shuffle()}});}
+        else if(op=="repeat"){queue.setRepeat(j.at("mode").get<std::string>());update({{"repeat",queue.repeat()}});}
     }
     void interrupted(){resumePosition=output->position();output->reset(resumePosition);decoder.reset();started=draining=false;}
 public:
@@ -131,33 +125,37 @@ public:
             if(!j.contains("index")||!j["index"].is_number_unsigned()||j["index"].get<size_t>()>=j["queue"].size())return error("Invalid queue index");
             if(j.contains("next_path")&&(!j["next_path"].is_string()||(!j["next_path"].get<std::string>().empty()&&j["next_path"].get<std::string>().rfind("/v1/",0)!=0)))return error("Invalid continuation path");
             for(auto& t:j["queue"])if(!t.is_object()||!t.contains("id")||!t["id"].is_string()||!t.contains("type")||!t["type"].is_string())return error("Invalid queue item");
-        } else if(op=="seek"||op=="volume") {
-            auto field=op=="seek"?"seconds":"value";
+        } else if(op=="shuffle") {
+            if(!j.contains("enabled")||!j["enabled"].is_boolean())return error("Shuffle enabled must be boolean");
+        } else if(op=="repeat") {
+            if(!j.contains("mode")||!j["mode"].is_string()||(j["mode"]!="off"&&j["mode"]!="single"&&j["mode"]!="queue"))return error("Repeat must be off, single or queue");
+        } else if(op=="seek") {
+            auto field="seconds";
             if(!j.contains(field)||!j[field].is_number()||!std::isfinite(j[field].get<double>()))return error("Numeric value required");
         } else if(op!="toggle"&&op!="next"&&op!="previous"&&op!="stop")return error("Unknown operation");
         auto pending=j;
-        if(op!="volume")pending["revision"]=++revision;
+        if(op!="shuffle"&&op!="repeat")pending["revision"]=++revision;
         commands.push_back(std::move(pending));return {{"accepted",true}};
     }
     void run(){
         try{
-            output=std::make_unique<AudioOutput>();output->volume(volume);
             auto lastConfig=std::chrono::steady_clock::time_point{};
             while(!shuttingDown.load()){
                 Json next;{std::lock_guard guard(lock);if(!commands.empty()){next=std::move(commands.front());commands.pop_front();}}
                 try{
                     auto now=std::chrono::steady_clock::now();
                     if(!next.is_null()||now-lastConfig>std::chrono::seconds(1)){syncConfig();lastConfig=now;}
+                    if(!output&&!next.is_null())output=std::make_unique<AudioOutput>();
                     if(!next.is_null())act(next);
                     if(decoder&&!paused){
                         int slot=output->available();
                         if(!draining&&slot>=0){int count=decoder->read(output->data(slot),AudioOutput::Frames);if(count){output->append(slot,count);if(!started){output->pause(false);started=true;}}else draining=true;}
-                        if(draining&&output->empty()){if(revision.load()!=operation)throw Cancelled();advance();}
+                        if(draining&&output->empty()){if(revision.load()!=operation)throw Cancelled();advance(true);}
                     }
-                    if(!manifest.empty())update({{"position",output->position()}});
-                }catch(const Cancelled&){interrupted();}
-                catch(const HttpError& e){stop();update({{"status","error"},{"error",e.what()},{"http_status",e.status}});}
-                catch(const std::exception& e){stop();update({{"status","error"},{"error",e.what()}});}
+                    if(output&&!manifest.empty())update({{"position",output->position()}});
+                }catch(const Cancelled&){try{interrupted();}catch(...){output.reset();decoder.reset();started=draining=false;}}
+                catch(const HttpError& e){decoder.reset();output.reset();manifest.clear();paused=started=draining=false;update({{"status","error"},{"error",e.what()},{"http_status",e.status}});}
+                catch(const std::exception& e){decoder.reset();output.reset();manifest.clear();paused=started=draining=false;update({{"status","error"},{"error",e.what()}});}
                 svcSleepThread(5000000);
             }
             stop();

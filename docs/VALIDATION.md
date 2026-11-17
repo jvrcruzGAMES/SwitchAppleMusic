@@ -47,3 +47,12 @@ Artwork tests verify thumbnail dimensions, RGBA4444 nibble ordering, cache hits,
 The Atmosphère crash with build ID `3738e33b2e73732431a3bace844dac6c98ac9191` was symbolized against the matching ELF: PC `+0x171fd8` is `memcpy`, called by the IPC reply write at `+0x2e534`. The reported destination is null and TLS contains a filesystem service reply. A host kernel/TLS test double now executes the production `control_ipc.cpp` server loop, overwrites TLS during a simulated nested filesystem request, and validates the resulting reply. The pre-fix source reproduces the null write under AddressSanitizer/UBSan; the fixed source passes, along with malformed-header and short-output tests. This fixture checks the actual server's buffer lifetime, not Horizon kernel execution.
 
 The NRO `0x00010801` regression fixture executes the production Switch client against a fake kernel where direct named-port connections always fail with LimitReached. SM-brokered connections succeed. It verifies one session across 100 polls, idle/account renewal, recovery after a lost state reply, no replay of toggle, bounded kernel/SM session-capacity retries, and an absent service returning without a GetService call. The server fixture also checks the registered service name and session count. Both fixtures run under AddressSanitizer/UBSan; hardware acceptance must still cover concurrent NRO/overlay use and Toolbox stop/start.
+
+Audio-output regression tests now model one returned release tag per call,
+Contains including undrained releases, delayed flush completion and a permanently
+retained buffer. They verify service reopen, default-gain restoration and playback
+after repeated stops. Queue tests cover shuffle uniqueness/current-track retention,
+Previous history, natural repeat-single versus manual Next, queue wrap and repeated
+remote-page fetches. The production desktop player checks seek preview/apply/cancel
+with controller events and shared shuffle/repeat labels. Physical overlay touch and
+audout recovery still require Switch testing.

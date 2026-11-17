@@ -13,7 +13,7 @@ The layouts and colors here are original; Switchfin is not a runtime dependency.
 | `home.xml`, `search.xml` | Discovery, library shortcuts and catalog search |
 | `login.xml`, `settings.xml` | Server/account inputs and Apple library settings |
 | `collection.xml`, `row.xml` | Collection headers, empty/pagination states and reusable music rows |
-| `player.xml` | Metadata, progress, transport/volume controls and synced lyrics |
+| `player.xml` | Metadata, progress, transport/mode controls and synced lyrics |
 | `qr.xml` | Apple linking instructions, confirmation, timer and QR placement |
 | `message.xml` | Loading and recoverable error states |
 
@@ -64,10 +64,18 @@ to backend/session and cleared at account/guest transitions. Each page owns and
 releases its textures. A music-note placeholder remains when artwork is absent.
 
 Now Playing uses a two-column XML layout: cover/metadata, icon transport buttons,
-seek and volume on the left; a full-height synced-lyrics panel on the right.
+a seekable progress bar, shuffle/repeat and stop on the left; a full-height synced-lyrics panel on the right.
 The active line is centered between the previous and next lines. Play/pause changes
 its vector glyph with playback state, retaining the standard button focus and
 controller bindings. The current cover uses a 256-pixel backend PNG and is cleared
 when the track changes; full-size covers do not enter the thumbnail cache.
 The desktop player fixture checks actual artwork loading, lyric placement, icon
 state, transport focus and the empty-player reset.
+
+Focus the progress bar with the D-pad, use Left/Right to preview a seek in
+five-second steps, then A to apply or B to cancel. Touch taps and horizontal drags
+seek on release. The overlay uses Up from its transport icons to focus its progress
+bar, with the same seek/apply/cancel controls; Down returns to the transport icons.
+Shuffle and repeat state are shared by both interfaces. Repeat cycles Off → Queue
+→ Song → Off. Manual Next still skips when repeat-song is selected. Volume controls
+are removed; the sysmodule always opens audio output at the previous 70% default.

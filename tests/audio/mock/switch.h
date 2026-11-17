@@ -8,3 +8,5 @@ Result audoutInitialize();void audoutExit();u32 audoutGetSampleRate();u32 audout
 Result audoutGetReleasedAudioOutBuffer(AudioOutBuffer**,u32*);Result audoutAppendAudioOutBuffer(AudioOutBuffer*);
 Result audoutStopAudioOut();Result audoutStartAudioOut();Result audoutFlushAudioOutBuffers(bool*);
 Result audoutContainsAudioOutBuffer(AudioOutBuffer*,bool*);Result audoutGetAudioOutPlayedSampleCount(u64*);Result audoutSetAudioOutVolume(float);
+
+Result svcSleepThread(int64_t);

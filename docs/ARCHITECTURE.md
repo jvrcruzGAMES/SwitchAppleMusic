@@ -49,9 +49,10 @@ CMIF command **0** carries one UTF-8 JSON request in an input HIPC MapAlias buff
 | `toggle` | none | accepted |
 | `next`, `previous`, `stop` | none | accepted |
 | `seek` | `seconds` (absolute, clamped to at least zero) | accepted |
-| `volume` | `value` (clamped 0–100) | accepted |
+| `shuffle` | `enabled: bool` | accepted |
+| `repeat` | `mode: "off", "single" or "queue"` | accepted |
 
-An accepted response means **queued**, not that playback succeeded. Errors are `{error:"…"}`. State contains `status`, `paused`, `position` and `duration` in seconds, `volume`, and the resolved `track`. Queue position/size refer to the retained queue window. Track preparation, transport or decoder errors appear in state. Poll to observe completion.
+An accepted response means **queued**, not that playback succeeded. Errors are `{error:"…"}`. State contains `status`, `paused`, `position` and `duration` in seconds, `shuffle`, `repeat`, and the resolved `track`. Queue position/size refer to the retained queue window. Track preparation, transport or decoder errors appear in state. Poll to observe completion.
 
 Both UIs use the common libnx IPC client. The sysmodule registers `smusic` with SM, which creates sessions on the caller's behalf and transfers the handles. Direct `svcConnectToNamedPort` charges session allocation to the NRO and can fail with kernel LimitReached (`0x00010801`) even when the overlay connects. Before lookup, clients use Atmosphere's TIPC `HasService` command 65100 so an already-disabled module does not enter a deferred SM lookup. At most four sessions are accepted; the server multiplexes the port and sessions and closes idle sessions after two seconds. Each UI serializes and reuses one connection, renewing it after a one-second gap or a backend/account change. A closed/invalid handle retries state/artwork once; toggle, play and skip are never replayed. Session-capacity errors receive bounded retries. Normal exit unregisters the owned service; Atmosphere removes hosted registrations when the owner's attached SM session closes after termination. Desktop previews return an IPC-unavailable error and never fall back to local TCP. The NRO's single HTTP worker uses two BSD sessions with buffer efficiency two instead of the vendored demo's twelve-session application configuration.
 
@@ -118,6 +119,30 @@ Normalized resources expose a backend-relative `artwork_path`. `GET /v1/artwork/
 
 The NRO uses asynchronous binary requests and a 64-entry thumbnail cache. Layout stays in `row.xml`: number, cover, then title/artist. Old-page image jobs are cancelled and stale results never touch destroyed views.
 
-The sysmodule lazily starts an independent artwork worker for the current resolved track. It retains one 256-pixel RGBA4444 cover and cancels/replaces pending fetches when the track/account changes. A missing cover or failed artwork-thread allocation does not prevent audio. IPC `op: artwork` takes `track_id` and byte `offset`, and returns validated 12 KiB chunks as hex within the existing 64 KiB message budget. The overlay assembles only the current cover, draws it centered above three vector transport icons, and keeps seek/volume/stop actions below. Image decoding/resizing happens on the backend; the overlay remains socket-free.
+The sysmodule lazily starts an independent artwork worker for the current resolved track. It retains one 256-pixel RGBA4444 cover and cancels/replaces pending fetches when the track/account changes. A missing cover or failed artwork-thread allocation does not prevent audio. IPC `op: artwork` takes `track_id` and byte `offset`, and returns validated 12 KiB chunks as hex within the existing 64 KiB message budget. The overlay assembles only the current cover, draws it centered above three vector transport icons, and provides a seekable progress bar and shuffle/repeat/stop actions. Image decoding/resizing happens on the backend; the overlay remains socket-free.
 
 IPC descriptors and payload pointers are copied out of the thread-local message buffer before invoking application handlers. Those handlers read configuration through filesystem IPC, which reuses the same TLS message area. Request bytes are also owned for the duration of dispatch. Reusing descriptor references after a nested service call can turn a valid mapped output buffer into a null address. On a returned control-server error, main unregisters the port, cancels/joins the audio worker and exits the module with a diagnostic log; it does not deliberately issue a fatal system report. Client connection/request errors include their kernel result codes.
+
+Shuffle and repeat are sysmodule-owned modes exposed as `shuffle` (boolean) and
+`repeat` (`off`, `single`, `queue`) in state. Commands set explicit values through
+`op: shuffle, enabled: bool` and `op: repeat, mode: string`. They do not cancel the
+active decoder. Repeat-single applies to natural EOF only; manual Next advances.
+Repeat-queue restarts the initial ID page and its continuation after EOF. Shuffle
+keeps the current track and permutes the loaded queue; subsequent remote pages are
+shuffled as they arrive. The queue retains a 28-ID previous-track history and an
+initial page for repeat, rather than loading an entire paginated library into RAM.
+The default audio gain remains 0.70 and the mutable volume command is removed.
+
+The two progress bars preview controller seeks locally (Left/Right, A apply,
+B cancel), and commit touch seeks on release. Seeking does not issue commands on
+every rendered frame. NRO placement remains in XML; a custom seek view supplies
+focus, input and vector drawing. Overlay progress is part of its transport panel.
+
+Audio release tags are drained one at a time: libnx's
+[`audoutGetReleasedAudioOutBuffer`](https://github.com/switchbrew/libnx/blob/master/nx/source/services/audout.c)
+passes a buffer containing space for one pointer. Following the submitted buffer's
+`next` pointer does not retrieve the remaining released tags. Reset stops/flushes,
+drains all tags and waits up to 100 ms for retained buffers. If ownership still
+cannot be recovered, it closes/reopens the audio service before reusing PCM and
+restores the default gain. Playback errors discard the failed output and decoder;
+the command worker stays alive and can initialize a fresh output for another song.

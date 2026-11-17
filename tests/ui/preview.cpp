@@ -98,6 +98,20 @@ int main(int argc, char **argv) {
             assert(brls::Application::mainLoop());
             assert(brls::Application::getCurrentFocus() == root->getView(move.second));
         }
+        auto* seek=dynamic_cast<SeekBar*>(root->getView("player/seek"));assert(seek);
+        double target=-1;seek->onSeek([&](double value){target=value;});
+        brls::Application::giveFocus(seek);
+        brls::Application::onControllerButtonPressed(brls::BUTTON_NAV_RIGHT,false);
+        assert(seek->displayedPosition()==20);
+        brls::Application::onControllerButtonPressed(brls::BUTTON_A,false);assert(target==20);
+        brls::Application::onControllerButtonPressed(brls::BUTTON_NAV_LEFT,false);
+        brls::Application::onControllerButtonPressed(brls::BUTTON_B,false);assert(target==20);
+        playback["shuffle"]=true;playback["repeat"]="single";library.updatePlaybackState(playback);
+        assert(dynamic_cast<brls::Button*>(root->getView("player/shuffle"))->getText()=="Shuffle: On");
+        assert(dynamic_cast<brls::Button*>(root->getView("player/repeat"))->getText()=="Repeat: Song");
+        playback["repeat"]="queue";library.updatePlaybackState(playback);
+        assert(dynamic_cast<brls::Button*>(root->getView("player/repeat"))->getText()=="Repeat: Queue");
+        seek->onSeek([](double){});
         brls::Application::giveFocus(root->getView("player/toggle"));
         std::cout << "Player artwork, full-height lyrics, icon state and controls verified" << std::endl;
     }

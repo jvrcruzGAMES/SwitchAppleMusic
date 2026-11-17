@@ -96,3 +96,13 @@ errors fall back without exposing private details, and cancellation propagates.
 A pinned-Gamdl adapter test exercises the real Song API and TTML-to-LRC conversion
 with mocked upstream clients. The authenticated HTTP route is checked end to end,
 and the existing keyless fallback, timestamp/offset and error tests remain in place.
+
+The sysmodule socket pool reserves four sets of its fixed TCP/UDP buffers
+(608 KiB total, using libnx's page-aligned transfer-memory calculation), with
+three BSD service sessions for playback, artwork and lyric workers. The previous
+two-set pool was 304 KiB against 144 KiB of TCP buffers per connection, leaving
+little headroom beyond two connections, including sockets still closing. This
+can explain why artwork fetched before playback succeeds while a new lyric
+connection during playback fails; device verification is still required. Confirm on hardware that lyrics load
+while audio is streaming, across track changes and repeated overlay opens. Host
+network tests do not emulate Horizon's shared socket transfer-memory allocation.

@@ -43,7 +43,11 @@ void __appInit() {
     SocketInitConfig sockets{};
     sockets.tcp_tx_buf_size=16*1024;sockets.tcp_rx_buf_size=128*1024;
     sockets.udp_tx_buf_size=4096;sockets.udp_rx_buf_size=4096;
-    sockets.sb_efficiency=2;sockets.num_bsd_sessions=2;sockets.bsd_service_type=BsdServiceType_User;
+    // libnx derives the shared socket pool from this multiplier. Two sets
+    // (304 KiB) leave little room beyond two 144 KiB TCP buffer pairs.
+    // Reserve four sets (608 KiB) so lyrics can connect during playback and
+    // artwork requests, including sockets still closing after a track change.
+    sockets.sb_efficiency=4;sockets.num_bsd_sessions=3;sockets.bsd_service_type=BsdServiceType_User;
     Result rc=socketInitialize(&sockets);if(R_FAILED(rc))diagAbortWithResult(rc);
 }
 void __appExit() {if(controlPortRegistered){smUnregisterService(smEncodeName(ControlServiceName));}romfsExit();socketExit();timeExit();fsdevUnmountAll();fsExit();smExit();}

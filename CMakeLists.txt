@@ -33,8 +33,8 @@ configure_file(resources/certs/LICENSE.txt ${CMAKE_BINARY_DIR}/romfs/certs/LICEN
 gen_dksh(${CMAKE_BINARY_DIR}/romfs/shaders)
 add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/SwitchMusic.nro
     COMMAND ${NX_NACPTOOL_EXE} --create "SwitchMusic" "SwitchMusic contributors" "0.1.0" ${CMAKE_BINARY_DIR}/SwitchMusic.nacp
-    COMMAND ${NX_ELF2NRO_EXE} $<TARGET_FILE:SwitchMusic> ${CMAKE_BINARY_DIR}/SwitchMusic.nro --nacp=${CMAKE_BINARY_DIR}/SwitchMusic.nacp --romfsdir=${CMAKE_BINARY_DIR}/romfs
-    DEPENDS SwitchMusic ${CMAKE_BINARY_DIR}/switchmusic-ui.stamp ${CMAKE_BINARY_DIR}/romfs/certs/cacert.pem ${CMAKE_BINARY_DIR}/romfs/certs/LICENSE.txt)
+    COMMAND ${NX_ELF2NRO_EXE} $<TARGET_FILE:SwitchMusic> ${CMAKE_BINARY_DIR}/SwitchMusic.nro --icon=${CMAKE_SOURCE_DIR}/resources/icon.jpg --nacp=${CMAKE_BINARY_DIR}/SwitchMusic.nacp --romfsdir=${CMAKE_BINARY_DIR}/romfs
+    DEPENDS SwitchMusic ${CMAKE_SOURCE_DIR}/resources/icon.jpg ${CMAKE_BINARY_DIR}/switchmusic-ui.stamp ${CMAKE_BINARY_DIR}/romfs/certs/cacert.pem ${CMAKE_BINARY_DIR}/romfs/certs/LICENSE.txt)
 add_custom_target(nro ALL DEPENDS ${CMAKE_BINARY_DIR}/SwitchMusic.nro)
 find_program(NX_BUILD_ROMFS_EXE build_romfs HINTS "$ENV{DEVKITPRO}/tools/bin" REQUIRED)
 add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/switchmusic-sys.romfs

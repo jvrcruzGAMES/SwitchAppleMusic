@@ -5,6 +5,7 @@ import shlex
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 ROOT=Path(__file__).resolve().parents[1]
 class Backend(http.server.BaseHTTPRequestHandler):
@@ -23,4 +24,15 @@ class LyricsTest(unittest.TestCase):
             with http.server.ThreadingHTTPServer(('127.0.0.1',0),Backend) as server:
                 thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
                 try:subprocess.run([str(binary),f'http://127.0.0.1:{server.server_port}'],check=True,timeout=10)
+                finally:server.shutdown();thread.join()
+            # Refuse the first connection, then bring the same endpoint online.
+            # The worker must recover without changing tracks or credentials.
+            with http.server.ThreadingHTTPServer(('127.0.0.1',0),Backend,bind_and_activate=False) as server:
+                server.server_bind()
+                def serve_later():
+                    time.sleep(.5)
+                    server.server_activate()
+                    server.serve_forever()
+                thread=threading.Thread(target=serve_later,daemon=True);thread.start()
+                try:subprocess.run([str(binary),f'http://127.0.0.1:{server.server_port}','retry'],check=True,timeout=12)
                 finally:server.shutdown();thread.join()

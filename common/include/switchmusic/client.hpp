@@ -15,6 +15,11 @@ struct Config {
     static void clear(const std::string& path=Path);
     void validate(bool requireSession=true);
 };
+class TransportError : public std::runtime_error {
+public:
+    bool retryable;
+    TransportError(const std::string& message,bool retryable):std::runtime_error(message),retryable(retryable){}
+};
 class HttpError : public std::runtime_error {
 public:
     long status;

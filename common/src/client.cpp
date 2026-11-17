@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <cerrno>
+#include <cstring>
 #include <algorithm>
 #include <cmath>
 namespace smusic {
@@ -81,7 +82,8 @@ static std::string request(const Config& c,const std::string& path,void* out,cur
     if(!csrf.empty())rawHeaders=curl_slist_append(rawHeaders,("X-CSRF-Token: "+csrf).c_str());
     std::unique_ptr<curl_slist,decltype(&curl_slist_free_all)> headers(rawHeaders,curl_slist_free_all);
     curl_easy_setopt(h.get(),CURLOPT_HTTPHEADER,headers.get());
-    curl_easy_setopt(h.get(),CURLOPT_CONNECTTIMEOUT,5L);
+    curl_easy_setopt(h.get(),CURLOPT_HTTP_VERSION,CURL_HTTP_VERSION_1_1);
+    curl_easy_setopt(h.get(),CURLOPT_CONNECTTIMEOUT,10L);
     curl_easy_setopt(h.get(),CURLOPT_TIMEOUT,timeout);
     curl_easy_setopt(h.get(),CURLOPT_NOSIGNAL,1L);
     curl_easy_setopt(h.get(),CURLOPT_FOLLOWLOCATION,0L);
@@ -100,7 +102,14 @@ static std::string request(const Config& c,const std::string& path,void* out,cur
     curl_easy_setopt(h.get(),CURLOPT_SSL_VERIFYHOST,2L);
     auto rc=curl_easy_perform(h.get());long status=0;
     curl_easy_getinfo(h.get(),CURLINFO_RESPONSE_CODE,&status);
-    if(rc!=CURLE_OK) throw std::runtime_error(std::string("Backend: ")+curl_easy_strerror(rc));
+    if(rc!=CURLE_OK) {
+        bool retryable=rc==CURLE_COULDNT_CONNECT||rc==CURLE_COULDNT_RESOLVE_HOST||
+            rc==CURLE_OPERATION_TIMEDOUT||rc==CURLE_RECV_ERROR||rc==CURLE_SEND_ERROR||rc==CURLE_GOT_NOTHING;
+        std::string message=std::string("Backend: ")+curl_easy_strerror(rc);
+        long socketError=0;curl_easy_getinfo(h.get(),CURLINFO_OS_ERRNO,&socketError);
+        if(socketError)message+=" ("+std::string(std::strerror(int(socketError)))+")";
+        throw TransportError(message,retryable);
+    }
     if(status!=200&&status!=204) {
         std::string message="Backend HTTP "+std::to_string(status);
         if(write==collect){auto j=Json::parse(*static_cast<std::string*>(out),nullptr,false);

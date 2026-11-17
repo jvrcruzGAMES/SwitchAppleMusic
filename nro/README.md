@@ -74,8 +74,9 @@ state, transport focus and the empty-player reset.
 
 Focus the progress bar with the D-pad, use Left/Right to preview a seek in
 five-second steps, then A to apply or B to cancel. Touch taps and horizontal drags
-seek on release. The overlay uses Up from its transport icons to focus its progress
-bar, with the same seek/apply/cancel controls; Down returns to the transport icons.
+seek on release. The overlay has a separate focusable progress-bar row below the transport
+icons. Press Down to reach it, then use the same seek/apply/cancel controls.
+Press Up to return to the icons, or Down again to reach shuffle/repeat.
 Shuffle and repeat state are shared by both interfaces. Repeat cycles Off → Queue
 → Song → Off. Manual Next still skips when repeat-song is selected. Volume controls
 are removed; the sysmodule always opens audio output at the previous 70% default.

@@ -136,7 +136,7 @@ The default audio gain remains 0.70 and the mutable volume command is removed.
 The two progress bars preview controller seeks locally (Left/Right, A apply,
 B cancel), and commit touch seeks on release. Seeking does not issue commands on
 every rendered frame. NRO placement remains in XML; a custom seek view supplies
-focus, input and vector drawing. Overlay progress is part of its transport panel.
+focus, input and vector drawing. Overlay progress is a separate focusable list row below its transport panel, with its own thumb, elapsed/total time, touch hit area and controller hints. Leaving the row cancels an uncommitted preview.
 
 Audio release tags are drained one at a time: libnx's
 [`audoutGetReleasedAudioOutBuffer`](https://github.com/switchbrew/libnx/blob/master/nx/source/services/audout.c)

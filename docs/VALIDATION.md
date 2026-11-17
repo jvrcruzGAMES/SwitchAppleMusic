@@ -56,3 +56,10 @@ Previous history, natural repeat-single versus manual Next, queue wrap and repea
 remote-page fetches. The production desktop player checks seek preview/apply/cancel
 with controller events and shared shuffle/repeat labels. Physical overlay touch and
 audout recovery still require Switch testing.
+
+The overlay seek-row fixture compiles the production `overlay/include/seek_bar.hpp`
+with a minimal libultrahand surface double. It exercises independent focus,
+controller preview/apply/cancel, preview stability across state polls, boundary
+clamping, touch dragging with one seek on release, progress-thumb position,
+track-change resets and disabled state. The Switch build uses real libultrahand;
+physical rendering and touch remain hardware acceptance checks.

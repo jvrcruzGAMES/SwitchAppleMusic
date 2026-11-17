@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 import asyncio
 import base64
@@ -287,15 +288,15 @@ def create_app(settings=None,transport=None):
         return result
 
     @app.get('/v1/playback/{song_id}.m3u8')
-    async def manifest(song_id: str):
+    async def manifest(song_id: str,codec: Literal['alac','aac','aac-web']|None=None):
         if not re.fullmatch(r'[0-9]{1,20}',song_id):raise HTTPException(400,'Expected numeric catalog ID')
-        return Response(await app.state.playback.manifest(song_id),media_type='application/vnd.apple.mpegurl')
+        return Response(await app.state.playback.manifest(song_id,codec=codec),media_type='application/vnd.apple.mpegurl')
 
     @app.get('/v1/stream/{song_id}')
-    async def stream(song_id: str):
+    async def stream(song_id: str,codec: Literal['alac','aac','aac-web']|None=None):
         if not re.fullmatch(r'[0-9]{1,20}',song_id):raise HTTPException(400,'Expected numeric catalog ID')
         # Only canonical catalog audio is cached/shared; library access is resolved per user.
-        path=await app.state.playback.materialize(song_id,acquire=True)
+        path=await app.state.playback.materialize(song_id,acquire=True,codec=codec)
         return LeasedAudioResponse(path,app.state.playback)
 
     @app.get('/v1/lyrics/{song_id}')

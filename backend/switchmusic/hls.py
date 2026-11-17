@@ -3,7 +3,7 @@ import math
 import struct
 from fastapi import HTTPException
 
-def playlist(path,song_id,duration):
+def playlist(path,song_id,duration,codec=None):
     size=path.stat().st_size
     offset=0;initialized=False;media=None
     with path.open('rb') as source:
@@ -25,7 +25,7 @@ def playlist(path,song_id,duration):
     if not initialized or media is None or media<=0 or media>=size:
         raise HTTPException(502,'Prepared audio is not fragmented MP4')
     if not math.isfinite(duration) or duration<=0:raise HTTPException(502,'Invalid track duration')
-    uri=f'/v1/stream/{song_id}'
+    uri=f'/v1/stream/{song_id}' + (f'?codec={codec}' if codec else '')
     return (f'#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:{math.ceil(duration)}\n'
             '#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n'
             f'#EXT-X-MAP:URI="{uri}",BYTERANGE="{media}@0"\n'

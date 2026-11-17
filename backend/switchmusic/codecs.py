@@ -4,10 +4,11 @@ from fastapi import HTTPException
 CODEC_PRIORITY = ("alac", "aac", "aac-web")
 SUPPORTED_SONG_CODECS = frozenset({"alac", "alac-lossless", "alac-hires", "aac", "aac-web"})
 
-async def select_source(song, wrapper):
+async def select_source(song, wrapper, codec=None):
     from gamdl.media import SongCodec
+    priority = CODEC_PRIORITY[CODEC_PRIORITY.index(codec) if codec else 0:]
     source = await song.get_stream(
-        codec_priority=tuple(SongCodec(codec) for codec in CODEC_PRIORITY),
+        codec_priority=tuple(SongCodec(candidate) for candidate in priority),
         wrapper_api=wrapper,
     )
     codec = source.codec.value

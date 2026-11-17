@@ -106,3 +106,33 @@ def test_static_urls_reuse_cache_and_repopulate_after_eviction_and_restart(clien
     response=client.get('/v1/stream/123',headers={'Range':'bytes=16-36'})
     assert response.status_code==206 and response.content==raw[16:37]
     assert renders==['123','123','123'] and cache.active=={}
+
+
+def test_codec_renditions_keep_separate_cache_and_stream_urls(client,monkeypatch):
+    async def song(*args):
+        return {**SONG,'attributes':{**SONG['attributes'],'durationInMillis':3500}}
+    monkeypatch.setattr('switchmusic.apple.Apple.catalog_song',song)
+    renders=[]
+    async def render(song_id,target,codec=None):
+        renders.append(codec)
+        target.write_bytes(box(b'ftyp')+box(b'moov')+box(b'moof')+box(b'mdat',(codec or 'default').encode()))
+    cache=client.app.state.playback;cache.render=render
+    for codec in (None,'alac','aac','aac-web'):
+        query=f'?codec={codec}' if codec else ''
+        response=client.get('/v1/playback/123.m3u8'+query)
+        assert response.status_code==200,response.text
+        assert f'/v1/stream/123{query}\n' in response.text
+        assert f'URI="/v1/stream/123{query}"' in response.text
+        audio=client.get('/v1/stream/123'+query)
+        assert audio.status_code==200
+        assert audio.content.endswith((codec or 'default').encode())
+        assert client.get('/v1/playback/123.m3u8'+query).text==response.text
+    assert renders==[None,'alac','aac','aac-web']
+    assert cache.active=={}
+    cache.prune(cache.s.max_cache_bytes)
+    assert not list(cache.s.cache_dir.glob('*.m4a'))
+    assert not list(cache.s.cache_dir.glob('*.m3u8'))
+
+@pytest.mark.parametrize('endpoint',['playback/123.m3u8','stream/123'])
+def test_invalid_codec_is_rejected(client,endpoint):
+    assert client.get('/v1/'+endpoint+'?codec=atmos').status_code==422

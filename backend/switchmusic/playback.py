@@ -36,10 +36,10 @@ class Playback:
         if not self.active[path]:
             self.active.pop(path, None)
 
-    async def materialize(self, song_id, acquire=False):
+    async def materialize(self, song_id, acquire=False, codec=None):
         async with self.lock:
             self.prune()
-            target = self.s.cache_dir / (song_id + ".m4a")
+            target = self.s.cache_dir / (song_id + ("-" + codec if codec else "") + ".m4a")
             if target.exists():
                 self.touched[target]=time.time()
                 if acquire:
@@ -51,7 +51,10 @@ class Playback:
             temp = target.with_suffix(".part")
             try:
                 async with asyncio.timeout(180):
-                    await self.render(song_id, temp)
+                    if codec:
+                        await self.render(song_id, temp, codec=codec)
+                    else:
+                        await self.render(song_id, temp)
                 temp.replace(target)
                 self.touched[target]=time.time()
                 if acquire:
@@ -66,13 +69,13 @@ class Playback:
             finally:
                 temp.unlink(missing_ok=True)
 
-    async def manifest(self, song_id):
-        path=await self.materialize(song_id,acquire=True)
+    async def manifest(self, song_id, codec=None):
+        path=await self.materialize(song_id,acquire=True,codec=codec)
         try:
             cached=path.with_suffix('.m3u8')
             if cached.exists():return cached.read_text()
             song=await self.apple.catalog_song('songs',song_id)
-            text=await asyncio.to_thread(playlist,path,song_id,song.get('attributes',{}).get('durationInMillis',0)/1000)
+            text=await asyncio.to_thread(playlist,path,song_id,song.get('attributes',{}).get('durationInMillis',0)/1000,codec)
             # Small synchronous write publishes only a complete playlist; no await
             # allows another request to interleave this rename.
             temporary=cached.with_suffix('.m3u8.part')
@@ -82,7 +85,7 @@ class Playback:
             return text
         finally:self.release(path)
 
-    async def render(self, song_id: str, target: Path):
+    async def render(self, song_id: str, target: Path, codec=None):
         # Imports stay lazy so browsing and tests work without the Rust extension.
         try:
             from gamdl.api import AppleMusicApi, WrapperApi
@@ -99,7 +102,7 @@ class Playback:
             async with AppleMusicApi(ApiHttpClient("apple_music"), credentials,
                                      self.s.storefront, "en-US") as api:
                 song = Song(song_id, api=api, metadata=resource)
-                source = await select_source(song, wrapper)
+                source = await select_source(song, wrapper, codec)
                 codec = source.codec.value
                 source = await wrapper_source(source)
                 async with Streamer(source, wrapper_api=wrapper, concurrency=2,

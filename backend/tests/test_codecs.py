@@ -38,3 +38,15 @@ def test_decryption_policy(codec,method,expected):
 def test_atmos_and_ac3_not_in_policy():
     assert CODEC_PRIORITY==('alac','aac','aac-web')
     assert not {'atmos','ac3'} & SUPPORTED_SONG_CODECS
+
+@pytest.mark.parametrize('codec,priority',[
+    ('alac',(Codec.ALAC,Codec.AAC,Codec.AAC_WEB)),
+    ('aac',(Codec.AAC,Codec.AAC_WEB)),
+    ('aac-web',(Codec.AAC_WEB,)),
+])
+async def test_codec_starts_at_requested_priority(codec,priority):
+    song=SimpleNamespace(get_stream=AsyncMock(return_value=SimpleNamespace(codec=SimpleNamespace(value=codec))))
+    media=ModuleType('gamdl.media');media.SongCodec=Codec
+    with patch.dict(sys.modules,{'gamdl':ModuleType('gamdl'),'gamdl.media':media}):
+        await select_source(song,'wrapper',codec)
+    song.get_stream.assert_awaited_once_with(codec_priority=priority,wrapper_api='wrapper')

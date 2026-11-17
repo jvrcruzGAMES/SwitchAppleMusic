@@ -89,3 +89,10 @@ cancellation, a finite retry budget, and that HTTP 503/partial responses are not
 replayed. The complete AAC/AAC-web/ALAC PCM, seek, chunked fallback and cancellation
 suite runs against the updated transport. On Switch, verify Stop → wait → Play while
 the NRO/overlay remain open, plus reconnect after a genuine Wi-Fi interruption.
+
+Backend lyric-priority tests verify Apple/Gamdl wins without calling the fallback,
+untimed/missing/malformed primary results use syncedlyrics, dependency/API/timeout
+errors fall back without exposing private details, and cancellation propagates.
+A pinned-Gamdl adapter test exercises the real Song API and TTML-to-LRC conversion
+with mocked upstream clients. The authenticated HTTP route is checked end to end,
+and the existing keyless fallback, timestamp/offset and error tests remain in place.

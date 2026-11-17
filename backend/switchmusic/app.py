@@ -301,7 +301,7 @@ def create_app(settings=None,transport=None):
     @app.get('/v1/lyrics/{song_id}')
     async def subtitles(song_id: str,principal: Principal=Depends(current)):
         song=await apple(principal).catalog_song('songs',valid_id(song_id))
-        return await lyrics(song)
+        return await lyrics(song, app.state.settings)
     return app
 
 app=create_app()

@@ -1,4 +1,4 @@
-"""Keyless synchronized lyrics via syncedlyrics, normalized for the console."""
+"""Apple Music/Gamdl first, then keyless syncedlyrics; shared console timing."""
 import asyncio
 import re
 
@@ -32,7 +32,41 @@ def parse_lrc(body):
     return sorted(lines, key=lambda row: row['time_ms'])
 
 
-async def lyrics(song):
+async def apple_lrc(song, settings):
+    """Use the pinned Gamdl Song API for Apple TTML -> standard LRC.
+
+    Wrapper credentials remain server-side. No audio/DRM pipeline is opened.
+    Imports are lazy so syncedlyrics still works without playback extras.
+    """
+    if settings is None or not song.get('id'):
+        return None
+    from gamdl.api import AppleMusicApi, WrapperApi
+    from gamdl.api.auth import credentials_from_wrapper
+    from gamdl.transport import ApiHttpClient
+    from gamdl.media import Song
+
+    async with asyncio.timeout(10):
+        async with (await WrapperApi.create(base_url=settings.wrapper_url,
+                decrypt_host=settings.decrypt_host, decrypt_port=settings.decrypt_port)) as wrapper:
+            credentials = credentials_from_wrapper(wrapper.me)
+            async with AppleMusicApi(ApiHttpClient('apple_music'), credentials,
+                                     settings.storefront, 'en-US') as api:
+                document = await Song(song['id'], api=api, metadata=song).get_lyrics()
+                if document is not None and document.is_synced:
+                    return document.to_lrc(enhanced=False)
+    return None
+
+
+async def lyrics(song, settings=None):
+    try:
+        body = await apple_lrc(song, settings)
+        lines = parse_lrc(body) if isinstance(body, str) else []
+        if any(line['text'] for line in lines):
+            return {'provider': 'apple-music', 'copyright': '', 'tracking_url': '', 'lines': lines}
+    except Exception:
+        # Missing Gamdl, wrapper/API failures, malformed TTML and timeouts all
+        # fall back. Cancellation is deliberately not swallowed.
+        pass
     attributes = song.get('attributes', {})
     title = attributes.get('name', '').strip()
     artist = attributes.get('artistName', '').strip()

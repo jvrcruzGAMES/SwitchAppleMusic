@@ -74,6 +74,8 @@ def test_library_catalog_resolution(client):
     assert r.json()['id'] == '123'
 
 def test_lyrics_without_api_key(client, monkeypatch):
+    async def no_apple(*args):return None
+    monkeypatch.setattr('switchmusic.lyrics.apple_lrc',no_apple)
     calls=[]
     def search(query, **kwargs):
         calls.append((query,kwargs))
@@ -166,3 +168,14 @@ def test_anonymous_catalog_browsing_never_uses_personal_token(settings):
         for path in ('/v1/library/songs','/v1/library/albums/123/tracks','/auth/me','/v1/resolve/songs/123'):
             assert client.get(path).status_code==401
         assert len(calls)==3
+
+def test_route_prefers_apple_lyrics(client, monkeypatch):
+    async def primary(song,settings):
+        assert song['id']=='123' and settings.wrapper_url=='http://wrapper'
+        return '[00:01.250]Apple line'
+    def forbidden(*args,**kwargs):raise AssertionError('Fallback must not be called')
+    monkeypatch.setattr('switchmusic.lyrics.apple_lrc',primary)
+    monkeypatch.setattr('switchmusic.lyrics.syncedlyrics.search',forbidden)
+    response=client.get('/v1/lyrics/123',headers=HEADERS)
+    assert response.status_code==200
+    assert response.json()=={'provider':'apple-music','copyright':'','tracking_url':'','lines':[{'time_ms':1250,'text':'Apple line'}]}

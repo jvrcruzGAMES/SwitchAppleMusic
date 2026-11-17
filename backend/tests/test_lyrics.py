@@ -44,3 +44,28 @@ async def test_missing_title_does_not_call_provider(monkeypatch):
     monkeypatch.setattr('switchmusic.lyrics.syncedlyrics.search',fail)
     with pytest.raises(HTTPException) as error:await lyrics({'attributes':{}})
     assert error.value.status_code==422
+
+@pytest.mark.parametrize('primary',[None,'','Plain Apple lyrics','[ar:metadata]','[00:01.000] '])
+async def test_apple_without_synced_lines_falls_back(monkeypatch,primary):
+    calls=[]
+    async def apple(*args):calls.append('apple');return primary
+    def fallback(*args,**kwargs):calls.append('syncedlyrics');return '[00:02.000]Fallback'
+    monkeypatch.setattr('switchmusic.lyrics.apple_lrc',apple)
+    monkeypatch.setattr('switchmusic.lyrics.syncedlyrics.search',fallback)
+    result=await lyrics(SONG,object())
+    assert calls==['apple','syncedlyrics'] and result['provider']=='syncedlyrics'
+
+@pytest.mark.parametrize('failure',[ImportError('missing optional package'),RuntimeError('private credential error'),TimeoutError()])
+async def test_apple_errors_fall_back_without_disclosing_details(monkeypatch,failure):
+    async def apple(*args):raise failure
+    monkeypatch.setattr('switchmusic.lyrics.apple_lrc',apple)
+    monkeypatch.setattr('switchmusic.lyrics.syncedlyrics.search',lambda *args,**kwargs:'[00:01]Fallback')
+    result=await lyrics(SONG,object())
+    assert result['provider']=='syncedlyrics' and 'private' not in str(result)
+
+async def test_apple_cancellation_does_not_start_fallback(monkeypatch):
+    async def apple(*args):raise asyncio.CancelledError()
+    def forbidden(*args,**kwargs):raise AssertionError('Do not continue cancelled requests')
+    monkeypatch.setattr('switchmusic.lyrics.apple_lrc',apple)
+    monkeypatch.setattr('switchmusic.lyrics.syncedlyrics.search',forbidden)
+    with pytest.raises(asyncio.CancelledError):await lyrics(SONG,object())

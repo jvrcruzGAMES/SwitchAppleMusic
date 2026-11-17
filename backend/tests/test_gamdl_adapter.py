@@ -48,3 +48,24 @@ async def test_web_aac_without_fairplay_fails_instead_of_falling_back_to_other_d
         await wrapper_source(source)
     assert error.value.status_code==502
     assert 'FairPlay' in error.value.detail
+
+async def test_lyrics_use_actual_pinned_song_and_ttml_conversion():
+    from switchmusic.lyrics import apple_lrc
+    ttml='<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="00:01.250" end="00:03.000">Apple line</p><p begin="00:03.000" end="00:05.000">Next line</p></div></body></tt>'
+    class Wrapper:
+        me={'auth':{'dev_token':'SERVER_DEVELOPER_TOKEN','music_user_token':'SERVER_USER_TOKEN'}}
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+    class Api:
+        def __init__(self,transport,credentials,storefront,language):
+            assert storefront=='us' and language=='en-US'
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+        async def get_lyrics(self,song_id,**kwargs):
+            assert song_id=='123'
+            return {'data':[{'attributes':{'ttml':ttml}}]}
+    settings=SimpleNamespace(wrapper_url='http://wrapper',decrypt_host='wrapper',decrypt_port=10020,storefront='us')
+    with patch('gamdl.api.WrapperApi.create',AsyncMock(return_value=Wrapper())) as create,patch('gamdl.api.AppleMusicApi',Api),patch('gamdl.transport.ApiHttpClient',lambda *args:object()):
+        result=await apple_lrc({'id':'123','type':'songs','attributes':{'hasLyrics':True}},settings)
+        assert result=='[00:01.25]Apple line\n[00:03.00]Next line'
+        create.assert_awaited_once_with(base_url='http://wrapper',decrypt_host='wrapper',decrypt_port=10020)

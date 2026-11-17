@@ -8,7 +8,7 @@ flowchart LR
   SYS -->|"M3U8 + bounded HTTP ranges"| API
   API -->|"Official catalog/library API"| APPLE["api.music.apple.com"]
   API -->|"Private HTTP + WV2D sample protocol"| WRAP["wrapper-v2"]
-  API -->|"syncedlyrics package · timed lyrics only"| LRC["Lyric providers"]
+  API -->|"Gamdl / Apple first · syncedlyrics fallback"| LRC["Lyric providers"]
   SYS --> AUDIO["Horizon audout"]
 ```
 
@@ -80,7 +80,7 @@ Personal library, resolution and lyrics routes require an active backend account
 | `GET /v1/stream/{numeric_catalog_id}` | Decrypted fMP4; supports HTTP Range |
 | `GET /v1/lyrics/{catalog_id}` | `{provider,copyright,tracking_url,lines:[{time_ms,text}]}` |
 
-Resources are normalized to IDs, resource type, title, artist, album, duration, catalog ID and ISRC. Raw wrapper snapshots and Apple responses are never forwarded. Library uploads without catalog counterparts are reported as unavailable. All lyric searches go through the `syncedlyrics` Python package with `synced_only=True`, matching title and artist. No Musixmatch API key is read or required. The blocking search runs outside the API event loop. LRC timestamps (including offsets and repeated timestamps) are normalized to milliseconds; metadata is ignored and plaintext is never assigned invented timing. Missing synchronized lyrics return 404, and package exceptions return a sanitized 502. The response identifies `syncedlyrics`; it does not claim an upstream provider that the package does not report. Docker sets `HOME=/tmp` so its provider cache stays on writable tmpfs.
+Resources are normalized to IDs, resource type, title, artist, album, duration, catalog ID and ISRC. Raw wrapper snapshots and Apple responses are never forwarded. Library uploads without catalog counterparts are reported as unavailable. Lyrics first use the pinned Gamdl `Song.get_lyrics()` API with server-side wrapper credentials, converting synchronized Apple TTML to standard LRC. This primary lookup has a ten-second deadline and does not open audio/decryption streams. Missing/untimed Apple lyrics, API/wrapper errors or an absent optional Gamdl dependency fall back to the `syncedlyrics` Python package with `synced_only=True`, matching title and artist. No Musixmatch API key is read or required. The blocking search runs outside the API event loop. LRC timestamps (including offsets and repeated timestamps) are normalized to milliseconds; metadata is ignored and plaintext is never assigned invented timing. Missing synchronized lyrics return 404, and package exceptions return a sanitized 502. The response identifies `apple-music` for the Gamdl/Apple source or `syncedlyrics` for the fallback; fallback results do not claim an upstream provider that the package does not report. Docker sets `HOME=/tmp` so its provider cache stays on writable tmpfs.
 
 ## Secrets and hosting
 
